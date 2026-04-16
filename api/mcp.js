@@ -139,7 +139,7 @@ async function callTool(name, args) {
     }
     case "ghl_contacts_by_tag": {
       const { tag, limit = 20 } = args;
-      const data = await ghl(`/contacts/?locationId=${LOCATION}&tags=${encodeURIComponent(tag)}&limit=${limit}`);
+      const data = await ghl(`/contacts/?locationId=${LOCATION}&tags[]=${encodeURIComponent(tag)}&limit=${limit}`);
       return (data.contacts || []).map(c => ({ id: c.id, name: c.name || "", email: c.email || "", phone: c.phone || "", tags: c.tags || [] }));
     }
     case "ghl_recent_contacts": {
