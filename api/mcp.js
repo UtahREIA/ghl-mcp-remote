@@ -208,15 +208,6 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  // Optional bearer token auth
-  const secret = process.env.MCP_SECRET;
-  if (secret) {
-    const auth = (req.headers.authorization || "").replace("Bearer ", "").trim();
-    if (auth !== secret) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-  }
-
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
