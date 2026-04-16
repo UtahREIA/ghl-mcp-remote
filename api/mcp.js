@@ -17,6 +17,13 @@ async function ghl(path) {
   return data;
 }
 
+async function ghlPost(path, body) {
+  const res  = await fetch(`https://services.leadconnectorhq.com${path}`, { method: "POST", headers: GHL_HEADERS, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || `GHL ${res.status}: ${path}`);
+  return data;
+}
+
 // ── Tool definitions ──────────────────────────────────────────────────────────
 
 const TOOLS = [
@@ -138,9 +145,38 @@ async function callTool(name, args) {
       return data.contact || data;
     }
     case "ghl_contacts_by_tag": {
-      const { tag, limit = 20 } = args;
-      const data = await ghl(`/contacts/?locationId=${LOCATION}&tags[]=${encodeURIComponent(tag)}&limit=${limit}`);
-      return (data.contacts || []).map(c => ({ id: c.id, name: c.name || "", email: c.email || "", phone: c.phone || "", tags: c.tags || [] }));
+      const { tag, limit = 100 } = args;
+      // GHL doesn't support server-side tag filtering — paginate in parallel and filter client-side
+      const STATUS_FIELD = "pVjzZbTLHlgbSX5IVbhc"; // contact.status custom field ID
+      const isStatusQuery = ["active", "inactive", "cancelled"].some(s => tag.toLowerCase().includes(s));
+
+      if (isStatusQuery) {
+        // Use the known Status custom field for membership queries
+        const statusValue = tag.toLowerCase().includes("active") ? "Active"
+          : tag.toLowerCase().includes("inactive") ? "Inactive" : "Cancelled";
+        const pages = Array.from({ length: 50 }, (_, i) => i + 1);
+        const results = await Promise.all(
+          pages.map(p => ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: 100, page: p }))
+        );
+        const all = results.flatMap(d => d.contacts || []);
+        const matched = all.filter(c => c.customFields?.some(f => f.id === STATUS_FIELD && f.value === statusValue));
+        return {
+          count: matched.length,
+          contacts: matched.slice(0, limit).map(c => ({ id: c.id, name: `${c.firstName||""} ${c.lastName||""}`.trim(), email: c.email || "", phone: c.phone || "", tags: c.tags || [] }))
+        };
+      }
+
+      // Regular tag filter — paginate in parallel
+      const pages = Array.from({ length: 50 }, (_, i) => i + 1);
+      const results = await Promise.all(
+        pages.map(p => ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: 100, page: p }))
+      );
+      const all = results.flatMap(d => d.contacts || []);
+      const matched = all.filter(c => c.tags?.some(t => t.toLowerCase() === tag.toLowerCase()));
+      return {
+        count: matched.length,
+        contacts: matched.slice(0, limit).map(c => ({ id: c.id, name: `${c.firstName||""} ${c.lastName||""}`.trim(), email: c.email || "", phone: c.phone || "", tags: c.tags || [] }))
+      };
     }
     case "ghl_recent_contacts": {
       const { limit = 15 } = args;
