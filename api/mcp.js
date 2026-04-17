@@ -108,6 +108,23 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "ghl_get_calendars",
+    description: "List all GHL calendars for this location.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_events",
+    description: "Get upcoming or recent events from GHL calendars. Returns event name, date, location, and description.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        startDate: { type: "string", description: "Start date in YYYY-MM-DD format (default: today)" },
+        endDate:   { type: "string", description: "End date in YYYY-MM-DD format (default: 90 days from today)" },
+        calendarId: { type: "string", description: "Specific calendar ID — omit to get all" },
+      },
+    },
+  },
+  {
     name: "ghl_get_workflows",
     description: "List all GHL workflows — names, statuses, and IDs.",
     inputSchema: { type: "object", properties: {} },
@@ -217,6 +234,30 @@ async function callTool(name, args) {
     case "ghl_get_location_info": {
       const data = await ghl(`/locations/${LOCATION}`);
       return data.location || data;
+    }
+    case "ghl_get_calendars": {
+      const data = await ghl(`/calendars/?locationId=${LOCATION}`);
+      return (data.calendars || []).map(c => ({ id: c.id, name: c.name, description: c.description || "" }));
+    }
+    case "ghl_get_events": {
+      const { calendarId, startDate, endDate } = args;
+      const start = startDate ? new Date(startDate) : new Date();
+      const end   = endDate   ? new Date(endDate)   : new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+      const startMs = start.getTime();
+      const endMs   = end.getTime();
+      let url = `/calendars/events?locationId=${LOCATION}&startTime=${startMs}&endTime=${endMs}`;
+      if (calendarId) url += `&calendarId=${calendarId}`;
+      const data = await ghl(url);
+      return (data.events || data.listEvents || []).map(e => ({
+        id:          e.id,
+        title:       e.title || e.name || "",
+        startTime:   e.startTime || e.start,
+        endTime:     e.endTime   || e.end,
+        location:    e.location  || e.address || "",
+        description: e.notes     || e.description || "",
+        calendarId:  e.calendarId,
+        status:      e.appointmentStatus || e.status || "",
+      }));
     }
     case "ghl_get_workflows": {
       const data = await ghl(`/workflows/?locationId=${LOCATION}`);
