@@ -208,7 +208,7 @@ async function callTool(name, args) {
     }
     case "ghl_recent_contacts": {
       const { limit = 15 } = args;
-      const data = await ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: limit, page: 1, sort: "desc", sortBy: "dateAdded" });
+      const data = await ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: 100, page: 1 });
       return (data.contacts || [])
         .sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded))
         .map(c => ({ id: c.id, name: `${c.firstName||""} ${c.lastName||""}`.trim(), email: c.email || "", phone: c.phone || "", tags: c.tags || [], createdAt: c.dateAdded }));
