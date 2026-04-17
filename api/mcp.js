@@ -208,8 +208,10 @@ async function callTool(name, args) {
     }
     case "ghl_recent_contacts": {
       const { limit = 15 } = args;
-      const data = await ghl(`/contacts/?locationId=${LOCATION}&limit=${limit}&sortBy=date_added&sortOrder=desc`);
-      return (data.contacts || []).map(c => ({ id: c.id, name: c.name || "", email: c.email || "", phone: c.phone || "", tags: c.tags || [], createdAt: c.dateAdded }));
+      const data = await ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: limit, page: 1, sort: "desc", sortBy: "dateAdded" });
+      return (data.contacts || [])
+        .sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded))
+        .map(c => ({ id: c.id, name: `${c.firstName||""} ${c.lastName||""}`.trim(), email: c.email || "", phone: c.phone || "", tags: c.tags || [], createdAt: c.dateAdded }));
     }
     case "ghl_get_conversations": {
       const { contactId, limit = 10 } = args;
