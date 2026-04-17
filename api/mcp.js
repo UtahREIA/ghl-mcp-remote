@@ -125,17 +125,6 @@ const TOOLS = [
     },
   },
   {
-    name: "ghl_get_blog_posts",
-    description: "Get event listings and blog posts published on the Utah REIA website through GHL. Use this to find upcoming events, past events, and event details like date, location, and description.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        limit:  { type: "number", description: "Max results (default 10)" },
-        blogId: { type: "string", description: "Specific blog ID — omit to search all blogs" },
-      },
-    },
-  },
-  {
     name: "ghl_get_workflows",
     description: "List all GHL workflows — names, statuses, and IDs.",
     inputSchema: { type: "object", properties: {} },
@@ -269,31 +258,6 @@ async function callTool(name, args) {
         calendarId:  e.calendarId,
         status:      e.appointmentStatus || e.status || "",
       }));
-    }
-    case "ghl_get_blog_posts": {
-      const { limit = 10, blogId } = args;
-      // First get all blogs for this location, then fetch posts
-      const blogsData = await ghl(`/blogs/?locationId=${LOCATION}`);
-      const blogs = blogsData.blogs || [];
-      const targetBlogs = blogId ? blogs.filter(b => b.id === blogId) : blogs;
-
-      const allPosts = [];
-      for (const blog of targetBlogs) {
-        const postsData = await ghl(`/blogs/${blog.id}/posts?locationId=${LOCATION}&limit=${limit}`);
-        const posts = postsData.posts || postsData.data || [];
-        posts.forEach(p => allPosts.push({
-          id:          p.id,
-          title:       p.title || "",
-          publishedAt: p.publishedAt || p.createdAt || "",
-          status:      p.status || "",
-          url:         p.url || p.slug || "",
-          description: p.description || p.excerpt || "",
-          blogName:    blog.name,
-        }));
-      }
-
-      allPosts.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
-      return allPosts.slice(0, limit);
     }
     case "ghl_get_workflows": {
       const data = await ghl(`/workflows/?locationId=${LOCATION}`);
