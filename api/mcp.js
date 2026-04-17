@@ -118,6 +118,17 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "ghl_count_contacts",
+    description: "Count total contacts in GHL, optionally filtered by membership status (Active, Inactive, Cancelled) or by tag name.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Filter by membership status: Active, Inactive, or Cancelled" },
+        tag:    { type: "string", description: "Filter by tag name" },
+      },
+    },
+  },
+  {
     name: "ghl_get_form_submissions",
     description: "Get recent submissions for a specific GHL form.",
     inputSchema: {
@@ -214,6 +225,26 @@ async function callTool(name, args) {
     case "ghl_get_forms": {
       const data = await ghl(`/forms/?locationId=${LOCATION}`);
       return (data.forms || []).map(f => ({ id: f.id, name: f.name }));
+    }
+    case "ghl_count_contacts": {
+      const { status, tag } = args;
+      const STATUS_FIELD = "pVjzZbTLHlgbSX5IVbhc";
+      const pages = Array.from({ length: 50 }, (_, i) => i + 1);
+      const results = await Promise.all(
+        pages.map(p => ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: 100, page: p }))
+      );
+      const all = results.flatMap(d => d.contacts || []);
+      const total = all.length;
+
+      if (status) {
+        const matched = all.filter(c => c.customFields?.some(f => f.id === STATUS_FIELD && f.value === status));
+        return { total, [`${status.toLowerCase()}_members`]: matched.length };
+      }
+      if (tag) {
+        const matched = all.filter(c => c.tags?.some(t => t.toLowerCase() === tag.toLowerCase()));
+        return { total, [`tag_${tag}`]: matched.length };
+      }
+      return { total };
     }
     case "ghl_get_form_submissions": {
       const { formId, limit = 10 } = args;
