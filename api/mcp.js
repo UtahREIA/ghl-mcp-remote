@@ -219,6 +219,148 @@ const TOOLS = [
       },
     },
   },
+  // ── New tools from expanded scopes ───────────────────────────────────────────
+  {
+    name: "ghl_get_tasks",
+    description: "Get tasks assigned in this GHL location.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contactId: { type: "string", description: "Filter tasks by contact ID (optional)" },
+        limit:     { type: "number" },
+      },
+    },
+  },
+  {
+    name: "ghl_get_custom_values",
+    description: "Get custom values (location-level variables) set for this GHL location.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_calendar_resources",
+    description: "List calendar resources (rooms, equipment) in GHL.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_courses",
+    description: "List courses and memberships in GHL.",
+    inputSchema: { type: "object", properties: { limit: { type: "number" } } },
+  },
+  {
+    name: "ghl_get_media",
+    description: "List media files (images, videos, documents) uploaded to GHL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        type:  { type: "string", description: "Filter by type: image, video, document" },
+        limit: { type: "number" },
+      },
+    },
+  },
+  {
+    name: "ghl_get_products",
+    description: "List products in GHL (used for order forms and ecommerce).",
+    inputSchema: { type: "object", properties: { limit: { type: "number" } } },
+  },
+  {
+    name: "ghl_get_product_prices",
+    description: "Get prices for a specific GHL product.",
+    inputSchema: {
+      type: "object",
+      properties: { productId: { type: "string" } },
+      required: ["productId"],
+    },
+  },
+  {
+    name: "ghl_get_product_collections",
+    description: "List product collections in GHL.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_associations",
+    description: "List contact/object associations in GHL.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_documents",
+    description: "List contracts and documents in GHL.",
+    inputSchema: { type: "object", properties: { limit: { type: "number" } } },
+  },
+  {
+    name: "ghl_get_document_templates",
+    description: "List contract/document templates in GHL.",
+    inputSchema: { type: "object", properties: { limit: { type: "number" } } },
+  },
+  {
+    name: "ghl_get_knowledge_base",
+    description: "List knowledge base articles in GHL.",
+    inputSchema: { type: "object", properties: { limit: { type: "number" } } },
+  },
+  {
+    name: "ghl_get_conversation_ai",
+    description: "Get Conversation AI (bot) settings and configuration for this GHL location.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_agent_studio",
+    description: "List AI agents configured in GHL Agent Studio.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_voice_ai_agents",
+    description: "List Voice AI agents in GHL.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_voice_ai_dashboard",
+    description: "Get Voice AI dashboard stats and overview for this GHL location.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_social_accounts",
+    description: "List connected social media accounts in GHL Social Planner.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_social_categories",
+    description: "List social media post categories in GHL Social Planner.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_social_tags",
+    description: "List social media tags in GHL Social Planner.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_social_stats",
+    description: "Get social media planner statistics for this GHL location.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_email_schedules",
+    description: "List scheduled emails in GHL.",
+    inputSchema: { type: "object", properties: { limit: { type: "number" } } },
+  },
+  {
+    name: "ghl_get_blog_categories",
+    description: "List blog categories in GHL.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_blog_authors",
+    description: "List blog authors in GHL.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_lc_email",
+    description: "Get LC Email (LeadConnector Email) campaigns and stats for this GHL location.",
+    inputSchema: { type: "object", properties: { limit: { type: "number" } } },
+  },
+  {
+    name: "ghl_get_funnel_page_counts",
+    description: "Get page count statistics for GHL funnels.",
+    inputSchema: { type: "object", properties: {} },
+  },
 ];
 
 // ── Tool implementations ──────────────────────────────────────────────────────
