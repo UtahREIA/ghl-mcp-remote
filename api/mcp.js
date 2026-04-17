@@ -510,6 +510,151 @@ async function callTool(name, args) {
       }
       return { total };
     }
+    // ── Tasks ─────────────────────────────────────────────────────────────────
+    case "ghl_get_tasks": {
+      const { contactId, limit = 20 } = args;
+      if (contactId) {
+        const data = await ghl(`/contacts/${contactId}/tasks`);
+        return data.tasks || [];
+      }
+      const data = await ghl(`/contacts/tasks?locationId=${LOCATION}&limit=${limit}`);
+      return data.tasks || [];
+    }
+
+    // ── Calendar Resources ────────────────────────────────────────────────────
+    case "ghl_get_calendar_resources": {
+      const data = await ghl(`/calendars/groups?locationId=${LOCATION}`);
+      return data.groups || data.resources || data;
+    }
+
+    // ── Custom Values ─────────────────────────────────────────────────────────
+    case "ghl_get_custom_values": {
+      const data = await ghl(`/locations/${LOCATION}/customValues`);
+      return (data.customValues || []).map(v => ({ id: v.id, name: v.name, value: v.value }));
+    }
+
+    // ── Courses ───────────────────────────────────────────────────────────────
+    case "ghl_get_courses": {
+      const data = await ghl(`/courses/?locationId=${LOCATION}`);
+      return (data.courses || []).map(c => ({ id: c.id, title: c.title, description: c.description, isPublished: c.isPublished }));
+    }
+
+    // ── Media ─────────────────────────────────────────────────────────────────
+    case "ghl_get_media": {
+      const { type, limit = 20 } = args;
+      let url = `/medias/?altId=${LOCATION}&altType=location&limit=${limit}`;
+      if (type) url += `&type=${type}`;
+      const data = await ghl(url);
+      return (data.medias || data.files || []).map(m => ({ id: m.id, name: m.name, url: m.url, type: m.type, size: m.size }));
+    }
+
+    // ── Products ──────────────────────────────────────────────────────────────
+    case "ghl_get_products": {
+      const { limit = 20 } = args;
+      const data = await ghl(`/products/?locationId=${LOCATION}&limit=${limit}`);
+      return (data.products || []).map(p => ({ id: p._id || p.id, name: p.name, description: p.description, price: p.price, type: p.productType }));
+    }
+    case "ghl_get_product_prices": {
+      const { productId } = args;
+      const data = await ghl(`/products/${productId}/price?locationId=${LOCATION}`);
+      return data.prices || data;
+    }
+    case "ghl_get_product_collections": {
+      const data = await ghl(`/products/collections/?locationId=${LOCATION}`);
+      return data.collections || data;
+    }
+
+    // ── Associations ──────────────────────────────────────────────────────────
+    case "ghl_get_associations": {
+      const data = await ghl(`/associations/?locationId=${LOCATION}`);
+      return data.associations || data;
+    }
+
+    // ── Documents ─────────────────────────────────────────────────────────────
+    case "ghl_get_documents": {
+      const { limit = 20 } = args;
+      const data = await ghl(`/documents/?locationId=${LOCATION}&limit=${limit}`);
+      return data.documents || data.proposals || [];
+    }
+    case "ghl_get_document_templates": {
+      const data = await ghl(`/documents/templates?locationId=${LOCATION}`);
+      return data.templates || data;
+    }
+
+    // ── Social Media Planner ──────────────────────────────────────────────────
+    case "ghl_get_social_accounts": {
+      const data = await ghl(`/social-media-posting/accounts?locationId=${LOCATION}`);
+      return (data.accounts || []).map(a => ({ id: a.id, name: a.name, platform: a.platform, username: a.username }));
+    }
+    case "ghl_get_social_categories": {
+      const data = await ghl(`/social-media-posting/categories?locationId=${LOCATION}`);
+      return data.categories || data;
+    }
+    case "ghl_get_social_tags": {
+      const data = await ghl(`/social-media-posting/tags?locationId=${LOCATION}`);
+      return data.tags || data;
+    }
+    case "ghl_get_social_stats": {
+      const data = await ghl(`/social-media-posting/stats?locationId=${LOCATION}`);
+      return data.stats || data;
+    }
+
+    // ── Blog ──────────────────────────────────────────────────────────────────
+    case "ghl_get_blog_categories": {
+      const data = await ghl(`/blogs/categories/?locationId=${LOCATION}`);
+      return data.categories || data;
+    }
+    case "ghl_get_blog_authors": {
+      const data = await ghl(`/blogs/authors/?locationId=${LOCATION}`);
+      return data.authors || data;
+    }
+
+    // ── Funnel Page Counts ────────────────────────────────────────────────────
+    case "ghl_get_funnel_page_counts": {
+      const data = await ghl(`/funnels/funnel/list?locationId=${LOCATION}&limit=50`);
+      return (data.funnels || []).map(f => ({ id: f._id || f.id, name: f.name, pageCount: (f.steps || f.pages || []).length }));
+    }
+
+    // ── Email Schedules ───────────────────────────────────────────────────────
+    case "ghl_get_email_schedules": {
+      const data = await ghl(`/emails/schedule?locationId=${LOCATION}`);
+      return data.schedules || data.data || data;
+    }
+
+    // ── LC Email ──────────────────────────────────────────────────────────────
+    case "ghl_get_lc_email": {
+      const data = await ghl(`/email-isv/verify?locationId=${LOCATION}`);
+      return data;
+    }
+
+    // ── Conversation AI ───────────────────────────────────────────────────────
+    case "ghl_get_conversation_ai": {
+      const data = await ghl(`/conversation-ai/settings?locationId=${LOCATION}`);
+      return data.bots || data.settings || data;
+    }
+
+    // ── Agent Studio ──────────────────────────────────────────────────────────
+    case "ghl_get_agent_studio": {
+      const data = await ghl(`/agent-studio/agents?locationId=${LOCATION}`);
+      return data.agents || data;
+    }
+
+    // ── Voice AI ──────────────────────────────────────────────────────────────
+    case "ghl_get_voice_ai_agents": {
+      const data = await ghl(`/voice-ai/agents?locationId=${LOCATION}`);
+      return (data.agents || []).map(a => ({ id: a.id, name: a.name, status: a.status, voiceId: a.voiceId }));
+    }
+    case "ghl_get_voice_ai_dashboard": {
+      const data = await ghl(`/voice-ai/dashboard?locationId=${LOCATION}`);
+      return data.stats || data.dashboard || data;
+    }
+
+    // ── Knowledge Base ────────────────────────────────────────────────────────
+    case "ghl_get_knowledge_base": {
+      const data = await ghl(`/knowledge-base/?locationId=${LOCATION}`);
+      return data.articles || data.items || data;
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
