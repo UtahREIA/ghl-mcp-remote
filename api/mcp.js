@@ -81,6 +81,18 @@ const TOOLS = [
     },
   },
   {
+    name: "ghl_get_conversation_messages",
+    description: "Get the actual messages inside a GHL conversation by conversation ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversationId: { type: "string" },
+        limit:          { type: "number", description: "Max messages (default 20)" },
+      },
+      required: ["conversationId"],
+    },
+  },
+  {
     name: "ghl_get_opportunities",
     description: "Get pipeline opportunities from GHL. Shows deal name, stage, value, and status.",
     inputSchema: {
@@ -114,14 +126,64 @@ const TOOLS = [
   },
   {
     name: "ghl_get_events",
-    description: "Get upcoming or recent events from GHL calendars. Returns event name, date, location, and description.",
+    description: "Get upcoming or recent appointments/events from GHL calendars.",
     inputSchema: {
       type: "object",
       properties: {
-        startDate: { type: "string", description: "Start date in YYYY-MM-DD format (default: today)" },
-        endDate:   { type: "string", description: "End date in YYYY-MM-DD format (default: 90 days from today)" },
-        calendarId: { type: "string", description: "Specific calendar ID — omit to get all" },
+        startDate:  { type: "string", description: "Start date YYYY-MM-DD (default: today)" },
+        endDate:    { type: "string", description: "End date YYYY-MM-DD (default: 90 days out)" },
+        calendarId: { type: "string", description: "Specific calendar ID — omit for all" },
       },
+    },
+  },
+  {
+    name: "ghl_get_funnels",
+    description: "List all GHL funnels and website pages. Useful for finding event listing pages on utahreia.org.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_funnel_pages",
+    description: "Get pages inside a specific GHL funnel — useful for reading event page content.",
+    inputSchema: {
+      type: "object",
+      properties: { funnelId: { type: "string" } },
+      required: ["funnelId"],
+    },
+  },
+  {
+    name: "ghl_get_blog_posts",
+    description: "Get blog posts published through GHL.",
+    inputSchema: {
+      type: "object",
+      properties: { limit: { type: "number", description: "Max results (default 10)" } },
+    },
+  },
+  {
+    name: "ghl_get_campaigns",
+    description: "List email and SMS campaigns in GHL.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_email_templates",
+    description: "List email templates built in GHL.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_surveys",
+    description: "List all surveys in GHL.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_trigger_links",
+    description: "List GHL trigger links (trackable links used in emails/SMS that fire workflows on click).",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_social_posts",
+    description: "Get scheduled or published social media posts from GHL Social Planner.",
+    inputSchema: {
+      type: "object",
+      properties: { limit: { type: "number", description: "Max results (default 20)" } },
     },
   },
   {
@@ -135,17 +197,6 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
-    name: "ghl_count_contacts",
-    description: "Count total contacts in GHL, optionally filtered by membership status (Active, Inactive, Cancelled) or by tag name.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        status: { type: "string", description: "Filter by membership status: Active, Inactive, or Cancelled" },
-        tag:    { type: "string", description: "Filter by tag name" },
-      },
-    },
-  },
-  {
     name: "ghl_get_form_submissions",
     description: "Get recent submissions for a specific GHL form.",
     inputSchema: {
@@ -155,6 +206,17 @@ const TOOLS = [
         limit:  { type: "number" },
       },
       required: ["formId"],
+    },
+  },
+  {
+    name: "ghl_count_contacts",
+    description: "Count total contacts in GHL, optionally filtered by membership status (Active, Inactive, Cancelled) or tag.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Filter by membership status: Active, Inactive, or Cancelled" },
+        tag:    { type: "string", description: "Filter by tag name" },
+      },
     },
   },
 ];
@@ -174,49 +236,40 @@ async function callTool(name, args) {
     }
     case "ghl_contacts_by_tag": {
       const { tag, limit = 100 } = args;
-      // GHL doesn't support server-side tag filtering — paginate in parallel and filter client-side
-      const STATUS_FIELD = "pVjzZbTLHlgbSX5IVbhc"; // contact.status custom field ID
+      const STATUS_FIELD = "pVjzZbTLHlgbSX5IVbhc";
       const isStatusQuery = ["active", "inactive", "cancelled"].some(s => tag.toLowerCase().includes(s));
-
       if (isStatusQuery) {
-        // Use the known Status custom field for membership queries
         const statusValue = tag.toLowerCase().includes("active") ? "Active"
           : tag.toLowerCase().includes("inactive") ? "Inactive" : "Cancelled";
         const pages = Array.from({ length: 50 }, (_, i) => i + 1);
-        const results = await Promise.all(
-          pages.map(p => ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: 100, page: p }))
-        );
+        const results = await Promise.all(pages.map(p => ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: 100, page: p })));
         const all = results.flatMap(d => d.contacts || []);
         const matched = all.filter(c => c.customFields?.some(f => f.id === STATUS_FIELD && f.value === statusValue));
-        return {
-          count: matched.length,
-          contacts: matched.slice(0, limit).map(c => ({ id: c.id, name: `${c.firstName||""} ${c.lastName||""}`.trim(), email: c.email || "", phone: c.phone || "", tags: c.tags || [] }))
-        };
+        return { count: matched.length, contacts: matched.slice(0, limit).map(c => ({ id: c.id, name: `${c.firstName||""} ${c.lastName||""}`.trim(), email: c.email || "", phone: c.phone || "", tags: c.tags || [] })) };
       }
-
-      // Regular tag filter — paginate in parallel
       const pages = Array.from({ length: 50 }, (_, i) => i + 1);
-      const results = await Promise.all(
-        pages.map(p => ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: 100, page: p }))
-      );
+      const results = await Promise.all(pages.map(p => ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: 100, page: p })));
       const all = results.flatMap(d => d.contacts || []);
       const matched = all.filter(c => c.tags?.some(t => t.toLowerCase() === tag.toLowerCase()));
-      return {
-        count: matched.length,
-        contacts: matched.slice(0, limit).map(c => ({ id: c.id, name: `${c.firstName||""} ${c.lastName||""}`.trim(), email: c.email || "", phone: c.phone || "", tags: c.tags || [] }))
-      };
+      return { count: matched.length, contacts: matched.slice(0, limit).map(c => ({ id: c.id, name: `${c.firstName||""} ${c.lastName||""}`.trim(), email: c.email || "", phone: c.phone || "", tags: c.tags || [] })) };
     }
     case "ghl_recent_contacts": {
       const { limit = 15 } = args;
       const data = await ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: 100, page: 1 });
       return (data.contacts || [])
         .sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded))
+        .slice(0, limit)
         .map(c => ({ id: c.id, name: `${c.firstName||""} ${c.lastName||""}`.trim(), email: c.email || "", phone: c.phone || "", tags: c.tags || [], createdAt: c.dateAdded }));
     }
     case "ghl_get_conversations": {
       const { contactId, limit = 10 } = args;
       const data = await ghl(`/conversations/search?locationId=${LOCATION}&contactId=${contactId}&limit=${limit}`);
       return data.conversations || [];
+    }
+    case "ghl_get_conversation_messages": {
+      const { conversationId, limit = 20 } = args;
+      const data = await ghl(`/conversations/${conversationId}/messages?limit=${limit}`);
+      return (data.messages || []).map(m => ({ id: m.id, type: m.messageType || m.type, body: m.body || m.text || "", direction: m.direction, dateAdded: m.dateAdded }));
     }
     case "ghl_get_opportunities": {
       const { pipelineId, status = "open", limit = 20 } = args;
@@ -245,21 +298,45 @@ async function callTool(name, args) {
       const { calendarId, startDate, endDate } = args;
       const start = startDate ? new Date(startDate) : new Date();
       const end   = endDate   ? new Date(endDate)   : new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
-      const startMs = start.getTime();
-      const endMs   = end.getTime();
-      let url = `/calendars/events?locationId=${LOCATION}&startTime=${startMs}&endTime=${endMs}`;
+      let url = `/calendars/events?locationId=${LOCATION}&startTime=${start.getTime()}&endTime=${end.getTime()}`;
       if (calendarId) url += `&calendarId=${calendarId}`;
       const data = await ghl(url);
-      return (data.events || data.listEvents || []).map(e => ({
-        id:          e.id,
-        title:       e.title || e.name || "",
-        startTime:   e.startTime || e.start,
-        endTime:     e.endTime   || e.end,
-        location:    e.location  || e.address || "",
-        description: e.notes     || e.description || "",
-        calendarId:  e.calendarId,
-        status:      e.appointmentStatus || e.status || "",
-      }));
+      return (data.events || data.listEvents || []).map(e => ({ id: e.id, title: e.title || e.name || "", startTime: e.startTime || e.start, endTime: e.endTime || e.end, location: e.location || e.address || "", description: e.notes || e.description || "", calendarId: e.calendarId, status: e.appointmentStatus || e.status || "" }));
+    }
+    case "ghl_get_funnels": {
+      const data = await ghl(`/funnels/funnel/list?locationId=${LOCATION}&limit=50`);
+      return (data.funnels || data.list || []).map(f => ({ id: f._id || f.id, name: f.name, domain: f.domain || "", pageCount: f.pageCount || 0 }));
+    }
+    case "ghl_get_funnel_pages": {
+      const { funnelId } = args;
+      const data = await ghl(`/funnels/page?funnelId=${funnelId}&locationId=${LOCATION}&limit=50`);
+      return (data.pages || data.list || []).map(p => ({ id: p._id || p.id, name: p.name, path: p.path || p.slug || "", url: p.url || "" }));
+    }
+    case "ghl_get_blog_posts": {
+      const { limit = 10 } = args;
+      const blogsData = await ghl(`/blogs/posts?locationId=${LOCATION}&limit=${limit}`);
+      return (blogsData.posts || blogsData.data || []).map(p => ({ id: p.id, title: p.title || "", publishedAt: p.publishedAt || p.createdAt || "", status: p.status || "", url: p.url || p.slug || "", description: p.description || p.excerpt || "" }));
+    }
+    case "ghl_get_campaigns": {
+      const data = await ghl(`/campaigns/?locationId=${LOCATION}`);
+      return (data.campaigns || []).map(c => ({ id: c.id, name: c.name, status: c.status || "", type: c.campaignType || "" }));
+    }
+    case "ghl_get_email_templates": {
+      const data = await ghl(`/emails/builder?locationId=${LOCATION}&limit=50`);
+      return (data.templates || data.data || []).map(t => ({ id: t.id, name: t.name || t.title || "", updatedAt: t.updatedAt || "" }));
+    }
+    case "ghl_get_surveys": {
+      const data = await ghl(`/surveys/?locationId=${LOCATION}`);
+      return (data.surveys || []).map(s => ({ id: s.id, name: s.name }));
+    }
+    case "ghl_get_trigger_links": {
+      const data = await ghl(`/links/?locationId=${LOCATION}`);
+      return (data.links || []).map(l => ({ id: l.id, name: l.name, url: l.redirectTo || l.url || "" }));
+    }
+    case "ghl_get_social_posts": {
+      const { limit = 20 } = args;
+      const data = await ghl(`/social-media-posting/${LOCATION}/posts?limit=${limit}`);
+      return (data.posts || data.data || []).map(p => ({ id: p.id, content: p.summary || p.content || "", platform: p.platform || "", scheduledAt: p.scheduledAt || "", status: p.status || "" }));
     }
     case "ghl_get_workflows": {
       const data = await ghl(`/workflows/?locationId=${LOCATION}`);
@@ -269,16 +346,18 @@ async function callTool(name, args) {
       const data = await ghl(`/forms/?locationId=${LOCATION}`);
       return (data.forms || []).map(f => ({ id: f.id, name: f.name }));
     }
+    case "ghl_get_form_submissions": {
+      const { formId, limit = 10 } = args;
+      const data = await ghl(`/forms/submissions?locationId=${LOCATION}&formId=${formId}&limit=${limit}`);
+      return data.submissions || [];
+    }
     case "ghl_count_contacts": {
       const { status, tag } = args;
       const STATUS_FIELD = "pVjzZbTLHlgbSX5IVbhc";
       const pages = Array.from({ length: 50 }, (_, i) => i + 1);
-      const results = await Promise.all(
-        pages.map(p => ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: 100, page: p }))
-      );
+      const results = await Promise.all(pages.map(p => ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: 100, page: p })));
       const all = results.flatMap(d => d.contacts || []);
       const total = all.length;
-
       if (status) {
         const matched = all.filter(c => c.customFields?.some(f => f.id === STATUS_FIELD && f.value === status));
         return { total, [`${status.toLowerCase()}_members`]: matched.length };
@@ -288,11 +367,6 @@ async function callTool(name, args) {
         return { total, [`tag_${tag}`]: matched.length };
       }
       return { total };
-    }
-    case "ghl_get_form_submissions": {
-      const { formId, limit = 10 } = args;
-      const data = await ghl(`/forms/submissions?locationId=${LOCATION}&formId=${formId}&limit=${limit}`);
-      return data.submissions || [];
     }
     default:
       throw new Error(`Unknown tool: ${name}`);
