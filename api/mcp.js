@@ -363,19 +363,14 @@ const TOOLS = [
   },
   {
     name: "ghl_get_attribution_report",
-    description: "Aggregate attribution report across all contacts. Shows contact counts broken down by traffic source, medium, campaign, and UTM parameters — for both first-touch and last-touch attribution. No reporting scope required.",
+    description: "Aggregate attribution report across all contacts. 'sessionSource' (recommended) reads lastAttributionSource.medium — the most populated field, showing values like Organic Search, Direct traffic, Client Portal, CRM UI. 'tag' groups by contact tags. 'leadSource' reads a Lead Source custom field. 'referrer' shows referring hostnames. 'campaign' reads UTM campaign (sparse unless UTMs are set up).",
     inputSchema: {
       type: "object",
       properties: {
-        touch: {
-          type: "string",
-          enum: ["first", "last", "both"],
-          description: "Which attribution model to report on: first touch, last touch, or both (default: both)",
-        },
         groupBy: {
           type: "string",
-          enum: ["source", "medium", "campaign", "utmSource", "utmMedium", "utmCampaign", "referrer"],
-          description: "Dimension to group by (default: source)",
+          enum: ["sessionSource", "tag", "leadSource", "referrer", "campaign"],
+          description: "Dimension to group by. Default: sessionSource",
         },
       },
     },
@@ -676,48 +671,85 @@ async function callTool(name, args) {
 
     // ── Attribution Report ────────────────────────────────────────────────────
     case "ghl_get_attribution_report": {
-      const { touch = "both", groupBy = "source" } = args;
+      const { groupBy = "sessionSource" } = args;
 
-      // Fetch all contacts across all pages (same pattern as ghl_count_contacts)
+      // Fetch all contacts across all pages
       const pages = Array.from({ length: 50 }, (_, i) => i + 1);
       const results = await Promise.all(pages.map(p => ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: 100, page: p })));
       const all = results.flatMap(d => d.contacts || []);
 
-      const fieldMap = {
-        source:      a => a?.source      || a?.medium || "(none)",
-        medium:      a => a?.medium      || "(none)",
-        campaign:    a => a?.campaign    || "(none)",
-        utmSource:   a => a?.utmSource   || "(none)",
-        utmMedium:   a => a?.utmMedium   || "(none)",
-        utmCampaign: a => a?.utmCampaign || "(none)",
-        referrer:    a => {
-          const r = a?.referrer || "";
-          if (!r) return "(direct)";
-          try { return new URL(r).hostname; } catch { return r; }
-        },
-      };
-
-      const getKey = fieldMap[groupBy] || fieldMap.source;
-
-      function aggregate(contacts, attrField) {
+      // Aggregate a single string key per contact
+      function aggregateSingle(contacts, getKey) {
         const counts = {};
+        let untracked = 0;
         for (const c of contacts) {
-          const attr = c[attrField] || {};
-          const key = getKey(attr);
-          counts[key] = (counts[key] || 0) + 1;
+          const v = getKey(c);
+          if (!v) { untracked++; continue; }
+          counts[v] = (counts[v] || 0) + 1;
         }
-        return Object.entries(counts)
+        const sorted = Object.entries(counts)
           .sort((a, b) => b[1] - a[1])
-          .map(([label, count]) => ({ [groupBy]: label, contacts: count }));
+          .map(([label, contacts]) => ({ label, contacts }));
+        if (untracked) sorted.push({ label: "(untracked)", contacts: untracked });
+        return sorted;
+      }
+
+      // Aggregate multiple keys per contact (e.g. tags)
+      function aggregateMulti(contacts, getKeys) {
+        const counts = {};
+        let untracked = 0;
+        for (const c of contacts) {
+          const keys = getKeys(c);
+          if (!keys.length) { untracked++; continue; }
+          for (const k of keys) counts[k] = (counts[k] || 0) + 1;
+        }
+        const sorted = Object.entries(counts)
+          .sort((a, b) => b[1] - a[1])
+          .map(([label, contacts]) => ({ label, contacts }));
+        if (untracked) sorted.push({ label: "(untracked)", contacts: untracked });
+        return sorted;
       }
 
       const report = { totalContacts: all.length, groupBy };
-      if (touch === "first" || touch === "both") {
-        report.firstTouch = aggregate(all, "attributionSource");
+
+      if (groupBy === "sessionSource") {
+        // lastAttributionSource.sessionSource is the populated field in GHL —
+        // values: "Organic Search", "Direct traffic", "Client Portal", "CRM UI / Manual", "Other / Phone API"
+        report.breakdown = aggregateSingle(all, c => {
+          const last = c.lastAttributionSource || {};
+          const first = c.attributionSource || {};
+          return last.sessionSource || first.sessionSource || last.medium || last.source || first.medium || first.source || "";
+        });
+        report.note = "Based on lastAttributionSource.sessionSource. 'Direct traffic' includes GHL SMS workflow link clicks (not true direct). ~50% of contacts may show as untracked if added via call/manual entry.";
+
+      } else if (groupBy === "tag") {
+        report.breakdown = aggregateMulti(all, c => c.tags || []);
+
+      } else if (groupBy === "leadSource") {
+        report.breakdown = aggregateSingle(all, c => {
+          const f = (c.customFields || []).find(f =>
+            (f.fieldKey || f.name || "").toLowerCase().includes("lead") ||
+            (f.fieldKey || f.name || "").toLowerCase().includes("source")
+          );
+          return f?.value || "";
+        });
+
+      } else if (groupBy === "referrer") {
+        report.breakdown = aggregateSingle(all, c => {
+          const r = (c.lastAttributionSource || c.attributionSource || {}).referrer || "";
+          if (!r) return "";
+          try { return new URL(r).hostname; } catch { return r; }
+        });
+
+      } else if (groupBy === "campaign") {
+        report.breakdown = aggregateSingle(all, c => {
+          const last = c.lastAttributionSource || {};
+          const first = c.attributionSource || {};
+          return last.utmCampaign || last.campaign || first.utmCampaign || first.campaign || "";
+        });
+        report.note = "UTM campaign fields are null unless external links are tagged with ?utm_campaign=...";
       }
-      if (touch === "last" || touch === "both") {
-        report.lastTouch = aggregate(all, "lastAttributionSource");
-      }
+
       return report;
     }
 
