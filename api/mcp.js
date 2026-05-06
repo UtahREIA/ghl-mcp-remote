@@ -361,6 +361,25 @@ const TOOLS = [
     description: "Get page count statistics for GHL funnels.",
     inputSchema: { type: "object", properties: {} },
   },
+  {
+    name: "ghl_get_attribution_report",
+    description: "Aggregate attribution report across all contacts. Shows contact counts broken down by traffic source, medium, campaign, and UTM parameters — for both first-touch and last-touch attribution. No reporting scope required.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        touch: {
+          type: "string",
+          enum: ["first", "last", "both"],
+          description: "Which attribution model to report on: first touch, last touch, or both (default: both)",
+        },
+        groupBy: {
+          type: "string",
+          enum: ["source", "medium", "campaign", "utmSource", "utmMedium", "utmCampaign", "referrer"],
+          description: "Dimension to group by (default: source)",
+        },
+      },
+    },
+  },
 ];
 
 // ── Tool implementations ──────────────────────────────────────────────────────
@@ -653,6 +672,53 @@ async function callTool(name, args) {
     case "ghl_get_knowledge_base": {
       const data = await ghl(`/knowledge-base/?locationId=${LOCATION}`);
       return data.articles || data.items || data;
+    }
+
+    // ── Attribution Report ────────────────────────────────────────────────────
+    case "ghl_get_attribution_report": {
+      const { touch = "both", groupBy = "source" } = args;
+
+      // Fetch all contacts across all pages (same pattern as ghl_count_contacts)
+      const pages = Array.from({ length: 50 }, (_, i) => i + 1);
+      const results = await Promise.all(pages.map(p => ghlPost("/contacts/search", { locationId: LOCATION, pageLimit: 100, page: p })));
+      const all = results.flatMap(d => d.contacts || []);
+
+      const fieldMap = {
+        source:      a => a?.source      || a?.medium || "(none)",
+        medium:      a => a?.medium      || "(none)",
+        campaign:    a => a?.campaign    || "(none)",
+        utmSource:   a => a?.utmSource   || "(none)",
+        utmMedium:   a => a?.utmMedium   || "(none)",
+        utmCampaign: a => a?.utmCampaign || "(none)",
+        referrer:    a => {
+          const r = a?.referrer || "";
+          if (!r) return "(direct)";
+          try { return new URL(r).hostname; } catch { return r; }
+        },
+      };
+
+      const getKey = fieldMap[groupBy] || fieldMap.source;
+
+      function aggregate(contacts, attrField) {
+        const counts = {};
+        for (const c of contacts) {
+          const attr = c[attrField] || {};
+          const key = getKey(attr);
+          counts[key] = (counts[key] || 0) + 1;
+        }
+        return Object.entries(counts)
+          .sort((a, b) => b[1] - a[1])
+          .map(([label, count]) => ({ [groupBy]: label, contacts: count }));
+      }
+
+      const report = { totalContacts: all.length, groupBy };
+      if (touch === "first" || touch === "both") {
+        report.firstTouch = aggregate(all, "attributionSource");
+      }
+      if (touch === "last" || touch === "both") {
+        report.lastTouch = aggregate(all, "lastAttributionSource");
+      }
+      return report;
     }
 
     default:

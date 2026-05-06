@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem c:\\\\Users\\\\david\\\\Downloads\\\\ghl-mcp-remote -Exclude node_modules)",
+      "Bash(Select-Object Name)",
+      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\david\\\\Downloads\\\\ghl-mcp-remote\" | Where-Object { $_.Name -ne \"node_modules\" } | Select-Object -ExpandProperty Name)"
+    ]
+  }
+}
