@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GHL Attribution Report Tool — Development Summary</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f4f6f9;
+      color: #1a1a2e;
+      line-height: 1.7;
+    }
+
+    header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 60%, #0f3460 100%);
+      color: #fff;
+      padding: 48px 40px 36px;
+    }
+
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    header p.subtitle {
+      margin-top: 8px;
+      font-size: 1rem;
+      color: #a8b8d8;
+    }
+
+    header .meta {
+      margin-top: 20px;
+      display: flex;
+      gap: 32px;
+      font-size: 0.85rem;
+      color: #7a9cc4;
+    }
+
+    header .meta span strong {
+      color: #e0eaff;
+    }
+
+    main {
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 0 24px 60px;
+    }
+
+    section {
+      background: #fff;
+      border-radius: 10px;
+      padding: 32px 36px;
+      margin-bottom: 28px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    }
+
+    h2 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #0f3460;
+      margin-bottom: 16px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #e8eef6;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    h2 .icon {
+      font-size: 1.1rem;
+    }
+
+    h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #16213e;
+      margin: 20px 0 8px;
+    }
+
+    p { margin-bottom: 12px; color: #3a4a5c; }
+
+    ul, ol {
+      margin: 8px 0 12px 20px;
+      color: #3a4a5c;
+    }
+
+    li { margin-bottom: 6px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 0.9rem;
+    }
+
+    thead th {
+      background: #0f3460;
+      color: #fff;
+      padding: 10px 14px;
+      text-align: left;
+      font-weight: 600;
+    }
+
+    tbody tr:nth-child(even) { background: #f4f6f9; }
+
+    tbody td {
+      padding: 10px 14px;
+      border-bottom: 1px solid #e8eef6;
+      color: #3a4a5c;
+      vertical-align: top;
+    }
+
+    code {
+      background: #eef2f8;
+      color: #0f3460;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85em;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    pre {
+      background: #1a1a2e;
+      color: #a8d8b0;
+      font-family: 'Courier New', monospace;
+      font-size: 0.82rem;
+      padding: 20px 24px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 16px 0;
+      line-height: 1.6;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    .badge.green  { background: #d4edda; color: #1a6630; }
+    .badge.yellow { background: #fff3cd; color: #856404; }
+    .badge.red    { background: #f8d7da; color: #842029; }
+    .badge.blue   { background: #cce5ff; color: #004085; }
+
+    .callout {
+      border-left: 4px solid #0f3460;
+      background: #f0f4fa;
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      margin: 16px 0;
+      font-size: 0.92rem;
+      color: #2a3a4c;
+    }
+
+    .callout.warning {
+      border-color: #e6a817;
+      background: #fffbf0;
+    }
+
+    .callout.success {
+      border-color: #28a745;
+      background: #f0fbf4;
+    }
+
+    .step-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 16px 0;
+    }
+
+    .step-card {
+      border: 1px solid #dde4f0;
+      border-radius: 8px;
+      padding: 16px 18px;
+    }
+
+    .step-card .num {
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: #0f3460;
+      opacity: 0.3;
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+
+    .step-card h4 {
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: #16213e;
+      margin-bottom: 6px;
+    }
+
+    .step-card p {
+      font-size: 0.85rem;
+      margin: 0;
+    }
+
+    footer {
+      text-align: center;
+      padding: 24px;
+      font-size: 0.82rem;
+      color: #8a9ab0;
+    }
+
+    @media (max-width: 640px) {
+      header { padding: 32px 20px 24px; }
+      header h1 { font-size: 1.4rem; }
+      section { padding: 22px 18px; }
+      .step-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>GHL Attribution Report Tool</h1>
+  <p class="subtitle">Development Summary — MCP Server Extension for GoHighLevel</p>
+  <div class="meta">
+    <span><strong>Project:</strong> ghl-mcp-remote</span>
+    <span><strong>Date:</strong> May 6, 2026</span>
+    <span><strong>Prepared by:</strong> David Igberi</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- Objective -->
+  <section>
+    <h2><span class="icon">🎯</span> Objective</h2>
+    <p>
+      The goal was to determine whether Claude, via the existing GHL MCP remote server, could access
+      GoHighLevel <strong>attribution report data</strong> and <strong>session events</strong> — and if
+      not, to build that capability directly into the server.
+    </p>
+    <p>
+      The end result is a new MCP tool — <code>ghl_get_attribution_report</code> — that aggregates
+      contact-level attribution data across the entire GHL database without requiring a paid
+      <code>reporting.readonly</code> API scope.
+    </p>
+  </section>
+
+  <!-- Background -->
+  <section>
+    <h2><span class="icon">📋</span> Background</h2>
+    <p>
+      The GHL MCP remote server (<code>api/mcp.js</code>) exposes GoHighLevel data to Claude via the
+      Model Context Protocol. Before this work, the server had <strong>48 tools</strong> covering
+      contacts, conversations, calendars, funnels, workflows, social media, products, and more — but
+      <strong>no attribution or session tracking tools</strong>.
+    </p>
+
+    <h3>What GHL Offers for Attribution</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Data Source</th>
+          <th>Where It Lives</th>
+          <th>Requires Reporting Scope?</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Contact-level attribution</td>
+          <td><code>attributionSource</code> + <code>lastAttributionSource</code> on each contact</td>
+          <td><span class="badge green">No</span></td>
+        </tr>
+        <tr>
+          <td>Session source field</td>
+          <td><code>lastAttributionSource.sessionSource</code></td>
+          <td><span class="badge green">No</span></td>
+        </tr>
+        <tr>
+          <td>UTM parameters</td>
+          <td><code>attributionSource.utmCampaign</code>, <code>utmSource</code>, etc.</td>
+          <td><span class="badge green">No</span> (but unpopulated unless UTMs are set up)</td>
+        </tr>
+        <tr>
+          <td>Aggregate reporting API</td>
+          <td><code>/reporting/attribution</code></td>
+          <td><span class="badge red">Yes — not available</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- What We Discovered -->
+  <section>
+    <h2><span class="icon">🔍</span> What We Discovered</h2>
+
+    <h3>1. UTM Fields Are Not in Use</h3>
+    <p>
+      Across all sampled contacts, <code>utmCampaign</code>, <code>utmSource</code>, and
+      <code>utmMedium</code> are all <code>null</code>. External links (social posts, emails, partner
+      referrals) are not currently tagged with UTM parameters, so no campaign-level breakdown is
+      possible yet.
+    </p>
+
+    <h3>2. <code>lastAttributionSource.sessionSource</code> Is Populated</h3>
+    <p>
+      The most reliable attribution field is <code>lastAttributionSource.sessionSource</code>. GHL
+      writes values like:
+    </p>
+    <table>
+      <thead>
+        <tr><th>Session Source Value</th><th>What It Means</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>Direct traffic</code></td><td>Contact clicked a GHL SMS/workflow link (not true direct)</td></tr>
+        <tr><td><code>Organic Search</code></td><td>Arrived at utahreia.org via Google</td></tr>
+        <tr><td><code>Client Portal</code></td><td>Self-registered through the membership portal</td></tr>
+        <tr><td><code>CRM UI / Manual</code></td><td>Added directly by a team member</td></tr>
+        <tr><td><code>Other / Phone API</code></td><td>Inbound call or SMS auto-created the contact</td></tr>
+      </tbody>
+    </table>
+
+    <h3>3. ~50% of Contacts Lack Attribution</h3>
+    <p>
+      Contacts added via inbound call, manual import, or without a tracked web session have no
+      attribution data. This is expected — GHL only captures session data when a contact interacts
+      with a tracked web page or form.
+    </p>
+
+    <div class="callout warning">
+      <strong>Note on "Direct traffic":</strong> GHL-internal SMS workflow links do not carry UTM
+      parameters, so clicks on those links register as Direct traffic rather than as a campaign source.
+      This inflates the Direct count.
+    </div>
+  </section>
+
+  <!-- What We Built -->
+  <section>
+    <h2><span class="icon">🔧</span> What We Built</h2>
+
+    <p>
+      A new tool — <code>ghl_get_attribution_report</code> — was added to <code>api/mcp.js</code>.
+      It uses the same bulk-contact-fetch pattern already in the server (50 pages × 100 contacts =
+      up to 5,000 contacts) and aggregates attribution data client-side, requiring no additional API
+      scopes.
+    </p>
+
+    <h3>Tool Definition</h3>
+    <pre>{
+  name: "ghl_get_attribution_report",
+  groupBy options: [
+    "sessionSource",  // recommended — reads lastAttributionSource.sessionSource
+    "tag",            // aggregates by contact tags (reliable proxy for source)
+    "leadSource",     // reads any custom field named "Lead Source"
+    "referrer",       // referring hostname from lastAttributionSource.referrer
+    "campaign"        // UTM campaign (sparse unless UTMs are configured)
+  ]
+}</pre>
+
+    <h3>How It Works</h3>
+    <div class="step-grid">
+      <div class="step-card">
+        <div class="num">01</div>
+        <h4>Fetch All Contacts</h4>
+        <p>Fires 50 parallel API calls to <code>/contacts/search</code>, pulling up to 5,000 contacts across all pages.</p>
+      </div>
+      <div class="step-card">
+        <div class="num">02</div>
+        <h4>Extract Attribution Field</h4>
+        <p>Reads <code>lastAttributionSource.sessionSource</code> per contact, falling back to <code>medium</code> and <code>source</code> fields.</p>
+      </div>
+      <div class="step-card">
+        <div class="num">03</div>
+        <h4>Aggregate &amp; Count</h4>
+        <p>Groups contacts by their source value and counts each group, tallying untracked contacts separately.</p>
+      </div>
+      <div class="step-card">
+        <div class="num">04</div>
+        <h4>Return Sorted Report</h4>
+        <p>Returns breakdown sorted by volume, plus total contact count and a note explaining known data quirks.</p>
+      </div>
+    </div>
+
+    <h3>Example Output</h3>
+    <pre>{
+  "totalContacts": 847,
+  "groupBy": "sessionSource",
+  "breakdown": [
+    { "label": "Direct traffic",     "contacts": 312 },
+    { "label": "Client Portal",      "contacts": 201 },
+    { "label": "Organic Search",     "contacts": 89  },
+    { "label": "CRM UI / Manual",    "contacts": 54  },
+    { "label": "Other / Phone API",  "contacts": 37  },
+    { "label": "(untracked)",        "contacts": 154 }
+  ],
+  "note": "Based on lastAttributionSource.sessionSource. 'Direct traffic' includes GHL SMS workflow link clicks."
+}</pre>
+  </section>
+
+  <!-- Iterations -->
+  <section>
+    <h2><span class="icon">🔄</span> How the Tool Evolved</h2>
+    <p>The tool went through three iterations based on live testing against real contact data:</p>
+    <ol>
+      <li>
+        <strong>Version 1 — UTM-based aggregation:</strong> Initially built to read
+        <code>attributionSource.utmSource</code>, <code>utmMedium</code>, and <code>utmCampaign</code>.
+        Testing revealed all UTM fields are <code>null</code> across the database.
+      </li>
+      <li>
+        <strong>Version 2 — Tag-based fallback:</strong> Pivoted to using contact tags as a source
+        proxy (e.g. <code>mtg attended</code>, <code>community member</code>, <code>true wealth jv
+        member</code>). This worked but mixed source intent with lifecycle stage.
+      </li>
+      <li>
+        <strong>Version 3 — sessionSource (final):</strong> Live contact inspection revealed
+        <code>lastAttributionSource.sessionSource</code> as the correct, populated field. Tool updated
+        to read this as the primary dimension, with tag and custom field modes retained as alternatives.
+      </li>
+    </ol>
+  </section>
+
+  <!-- Limitations -->
+  <section>
+    <h2><span class="icon">⚠️</span> Current Limitations</h2>
+    <table>
+      <thead>
+        <tr><th>Limitation</th><th>Impact</th><th>Fix</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>No UTM parameters on external links</td>
+          <td>Cannot distinguish Facebook, email, or partner traffic</td>
+          <td>Add <code>?utm_source=facebook&amp;utm_medium=social</code> to all external links</td>
+        </tr>
+        <tr>
+          <td>GHL SMS links register as Direct</td>
+          <td>Direct traffic count is inflated</td>
+          <td>GHL limitation — no current workaround; tag contacts via workflow instead</td>
+        </tr>
+        <tr>
+          <td>~50% of contacts untracked</td>
+          <td>Source breakdown is partial</td>
+          <td>Ensure all entry points (calls, imports) tag contacts with a source tag via workflow</td>
+        </tr>
+        <tr>
+          <td>No <code>reporting.readonly</code> scope</td>
+          <td>Cannot access GHL's native aggregate reporting API</td>
+          <td>Request scope from GHL, or use the GHL Reporting dashboard directly</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Next Steps -->
+  <section>
+    <h2><span class="icon">🚀</span> Recommended Next Steps</h2>
+    <ol>
+      <li>
+        <strong>Deploy to Vercel</strong> — push the updated <code>api/mcp.js</code> to make
+        <code>ghl_get_attribution_report</code> available to Claude.
+      </li>
+      <li>
+        <strong>Set up UTM tagging</strong> — add UTM parameters to all external links (social posts,
+        email blasts, partner referrals) so future contacts carry campaign attribution.
+      </li>
+      <li>
+        <strong>Add source-tagging workflows</strong> — create GHL workflows that automatically tag
+        contacts with their entry channel (e.g. inbound call → tag <code>source: phone</code>) to
+        fill the ~50% untracked gap.
+      </li>
+      <li>
+        <strong>Request reporting scope</strong> — adding <code>reporting.readonly</code> to the API
+        key would unlock GHL's native aggregate reporting endpoints for richer data.
+      </li>
+    </ol>
+
+    <div class="callout success">
+      The tool is production-ready as-is. Running <code>ghl_get_attribution_report</code> with
+      <code>groupBy: "sessionSource"</code> will give a real breakdown across your full contact
+      database immediately after deployment.
+    </div>
+  </section>
+
+  <!-- File Reference -->
+  <section>
+    <h2><span class="icon">📁</span> File Changed</h2>
+    <table>
+      <thead>
+        <tr><th>File</th><th>Change</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>api/mcp.js</code></td>
+          <td>Added <code>ghl_get_attribution_report</code> tool definition and implementation (lines ~360–430)</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>No new files, no new environment variables, no dependency changes.</p>
+  </section>
+
+</main>
+
+<footer>
+  GHL MCP Remote — Attribution Report Development Summary &nbsp;|&nbsp; Utah REIA &nbsp;|&nbsp; May 2026
+</footer>
+
+</body>
+</html>
