@@ -662,6 +662,127 @@ const TOOLS = [
     },
   },
 
+  // ── Extra Write: Calendar Appointments ──────────────────────────────────────
+  {
+    name: "ghl_create_appointment",
+    description: "Book a calendar appointment for a contact.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        calendarId:          { type: "string" },
+        contactId:           { type: "string" },
+        startTime:           { type: "string", description: "ISO datetime (e.g. 2026-05-20T14:00:00Z)" },
+        endTime:             { type: "string", description: "ISO datetime" },
+        title:               { type: "string" },
+        appointmentStatus:   { type: "string", enum: ["new", "confirmed", "cancelled", "showed", "noshow"], description: "Default: confirmed" },
+        assignedUserId:      { type: "string" },
+        address:             { type: "string" },
+        meetingLocationType: { type: "string", description: "e.g. 'custom', 'zoom', 'google'" },
+      },
+      required: ["calendarId", "contactId", "startTime", "endTime"],
+    },
+  },
+  {
+    name: "ghl_update_appointment",
+    description: "Update an existing calendar appointment (reschedule, change status, etc).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        eventId:           { type: "string" },
+        startTime:         { type: "string" },
+        endTime:           { type: "string" },
+        title:             { type: "string" },
+        appointmentStatus: { type: "string", enum: ["new", "confirmed", "cancelled", "showed", "noshow"] },
+        assignedUserId:    { type: "string" },
+        address:           { type: "string" },
+      },
+      required: ["eventId"],
+    },
+  },
+  {
+    name: "ghl_cancel_appointment",
+    description: "Cancel (delete) a calendar appointment. Requires confirm:true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        eventId: { type: "string" },
+        confirm: { type: "boolean", description: "Must be true to proceed" },
+      },
+      required: ["eventId", "confirm"],
+    },
+  },
+
+  // ── Extra Write: Email Templates ────────────────────────────────────────────
+  {
+    name: "ghl_create_email_template",
+    description: "Create a new email template in GHL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name:    { type: "string" },
+        subject: { type: "string" },
+        html:    { type: "string", description: "Template HTML body" },
+      },
+      required: ["name", "html"],
+    },
+  },
+  {
+    name: "ghl_update_email_template",
+    description: "Update an existing email template.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        templateId: { type: "string" },
+        name:       { type: "string" },
+        subject:    { type: "string" },
+        html:       { type: "string" },
+      },
+      required: ["templateId"],
+    },
+  },
+
+  // ── Extra Write: Trigger Links / Media / Knowledge Base ─────────────────────
+  {
+    name: "ghl_create_trigger_link",
+    description: "Create a trackable trigger link (used in emails/SMS that fire workflows on click).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name:       { type: "string" },
+        redirectTo: { type: "string", description: "Destination URL" },
+      },
+      required: ["name", "redirectTo"],
+    },
+  },
+  {
+    name: "ghl_upload_media",
+    description: "Upload a media file to GHL from a publicly hosted URL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        hostedUrl: { type: "string", description: "Public URL of the file to import" },
+        name:      { type: "string", description: "File name (optional)" },
+        parentId:  { type: "string", description: "Folder ID (optional)" },
+      },
+      required: ["hostedUrl"],
+    },
+  },
+  {
+    name: "ghl_create_kb_article",
+    description: "Create a new knowledge base article.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title:           { type: "string" },
+        content:         { type: "string", description: "Article body (HTML or markdown)" },
+        knowledgeBaseId: { type: "string", description: "Parent KB ID" },
+        categoryId:      { type: "string" },
+        status:          { type: "string", enum: ["DRAFT", "PUBLISHED"], description: "Default: DRAFT" },
+      },
+      required: ["title", "content"],
+    },
+  },
+
   {
     name: "ghl_get_attribution_report",
     description: "Aggregate attribution report across all contacts. 'sessionSource' (recommended) reads lastAttributionSource.medium — the most populated field, showing values like Organic Search, Direct traffic, Client Portal, CRM UI. 'tag' groups by contact tags. 'leadSource' reads a Lead Source custom field. 'referrer' shows referring hostnames. 'campaign' reads UTM campaign (sparse unless UTMs are set up).",
@@ -1265,6 +1386,103 @@ async function callTool(name, args) {
       }
       const data = await ghlPut(`/agent-studio/agents/${agentId}`, body);
       return data.agent || data;
+    }
+
+    // ── Extra Write: Calendar Appointments ────────────────────────────────────
+    case "ghl_create_appointment": {
+      const { calendarId, contactId, startTime, endTime, title, appointmentStatus = "confirmed", assignedUserId, address, meetingLocationType } = args;
+      const body = {
+        locationId: LOCATION,
+        calendarId,
+        contactId,
+        startTime,
+        endTime,
+        appointmentStatus,
+      };
+      if (title)               body.title               = title;
+      if (assignedUserId)      body.assignedUserId      = assignedUserId;
+      if (address)             body.address             = address;
+      if (meetingLocationType) body.meetingLocationType = meetingLocationType;
+      const data = await ghlPost("/calendars/events/appointments", body);
+      return data.event || data.appointment || data;
+    }
+
+    case "ghl_update_appointment": {
+      const { eventId, ...fields } = args;
+      const body = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/calendars/events/appointments/${eventId}`, body);
+      return data.event || data.appointment || data;
+    }
+
+    case "ghl_cancel_appointment": {
+      const { eventId, confirm } = args;
+      if (confirm !== true) throw new Error("Refusing to cancel: pass confirm:true to proceed");
+      return await ghlDelete(`/calendars/events/${eventId}`);
+    }
+
+    // ── Extra Write: Email Templates ──────────────────────────────────────────
+    case "ghl_create_email_template": {
+      const { name: tName, subject, html } = args;
+      const body = { locationId: LOCATION, name: tName, html };
+      if (subject) body.subject = subject;
+      const data = await ghlPost("/emails/builder", body);
+      return data.template || data.data || data;
+    }
+
+    case "ghl_update_email_template": {
+      const { templateId, ...fields } = args;
+      const body = { locationId: LOCATION };
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/emails/builder/${templateId}`, body);
+      return data.template || data;
+    }
+
+    // ── Extra Write: Trigger Links ────────────────────────────────────────────
+    case "ghl_create_trigger_link": {
+      const { name: linkName, redirectTo } = args;
+      const data = await ghlPost("/links/", { locationId: LOCATION, name: linkName, redirectTo });
+      return data.link || data;
+    }
+
+    // ── Extra Write: Media Upload ─────────────────────────────────────────────
+    case "ghl_upload_media": {
+      const { hostedUrl, name: mediaName, parentId } = args;
+      const formData = new FormData();
+      formData.append("hosted", "true");
+      formData.append("fileUrl", hostedUrl);
+      if (mediaName) formData.append("name", mediaName);
+      if (parentId)  formData.append("parentId", parentId);
+      const res = await fetch(`https://services.leadconnectorhq.com/medias/upload-file?locationId=${LOCATION}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TOKEN}`,
+          Version: "2021-07-28",
+        },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || `GHL ${res.status}: upload media`);
+      return data;
+    }
+
+    // ── Extra Write: Knowledge Base Article ───────────────────────────────────
+    case "ghl_create_kb_article": {
+      const { title: kbTitle, content, knowledgeBaseId, categoryId, status = "DRAFT" } = args;
+      const body = {
+        locationId: LOCATION,
+        title: kbTitle,
+        content,
+        status,
+      };
+      if (knowledgeBaseId) body.knowledgeBaseId = knowledgeBaseId;
+      if (categoryId)      body.categoryId      = categoryId;
+      const data = await ghlPost("/knowledge-base/", body);
+      return data.article || data;
     }
 
     default:
