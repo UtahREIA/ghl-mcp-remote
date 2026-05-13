@@ -543,6 +543,125 @@ const TOOLS = [
     },
   },
 
+  // ── Tier 2: Write tools — Pipeline / sales ──────────────────────────────────
+  {
+    name: "ghl_create_opportunity",
+    description: "Create a new opportunity (deal) in a GHL pipeline.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pipelineId:      { type: "string", description: "Pipeline ID (get from ghl_get_opportunities response)" },
+        pipelineStageId: { type: "string", description: "Stage ID within the pipeline" },
+        name:            { type: "string", description: "Opportunity name (deal name)" },
+        contactId:       { type: "string" },
+        status:          { type: "string", enum: ["open", "won", "lost", "abandoned"], description: "Default: open" },
+        monetaryValue:   { type: "number" },
+        assignedTo:      { type: "string", description: "User ID to assign" },
+        source:          { type: "string" },
+        notes:           { type: "string" },
+      },
+      required: ["pipelineId", "pipelineStageId", "name", "contactId"],
+    },
+  },
+  {
+    name: "ghl_update_opportunity",
+    description: "Update fields on an existing opportunity (name, value, status, notes, assignedTo).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        opportunityId: { type: "string" },
+        name:          { type: "string" },
+        status:        { type: "string", enum: ["open", "won", "lost", "abandoned"] },
+        monetaryValue: { type: "number" },
+        assignedTo:    { type: "string" },
+        notes:         { type: "string" },
+      },
+      required: ["opportunityId"],
+    },
+  },
+  {
+    name: "ghl_update_opportunity_stage",
+    description: "Move an opportunity to a different stage in its pipeline.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        opportunityId:   { type: "string" },
+        pipelineStageId: { type: "string", description: "Target stage ID" },
+      },
+      required: ["opportunityId", "pipelineStageId"],
+    },
+  },
+
+  // ── Tier 4: Write tools — Configuration ─────────────────────────────────────
+  {
+    name: "ghl_create_tag",
+    description: "Create a new location-level tag in GHL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Tag name" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "ghl_update_custom_value",
+    description: "Update a location-level custom value (variable) in GHL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customValueId: { type: "string", description: "ID from ghl_get_custom_values" },
+        name:          { type: "string" },
+        value:         { type: "string" },
+      },
+      required: ["customValueId", "value"],
+    },
+  },
+  {
+    name: "ghl_create_custom_field",
+    description: "Create a new custom field for contacts in this GHL location.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name:      { type: "string" },
+        dataType:  { type: "string", enum: ["TEXT", "LARGE_TEXT", "NUMERICAL", "PHONE", "MONETORY", "CHECKBOX", "SINGLE_OPTIONS", "MULTIPLE_OPTIONS", "DATE", "RADIO", "TEXTBOX_LIST", "FILE_UPLOAD"], description: "Field data type" },
+        position:  { type: "number", description: "Display position (optional)" },
+        placeholder:{ type: "string" },
+        options:   { type: "array", items: { type: "string" }, description: "Options for select/radio/checkbox fields" },
+      },
+      required: ["name", "dataType"],
+    },
+  },
+  {
+    name: "ghl_update_voice_ai_agent",
+    description: "Update configuration of a Voice AI agent in GHL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentId: { type: "string" },
+        name:    { type: "string" },
+        status:  { type: "string" },
+        voiceId: { type: "string" },
+        prompt:  { type: "string", description: "Agent system prompt / instructions" },
+      },
+      required: ["agentId"],
+    },
+  },
+  {
+    name: "ghl_update_agent_studio",
+    description: "Update an AI agent in GHL Agent Studio.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentId: { type: "string" },
+        name:    { type: "string" },
+        status:  { type: "string" },
+        prompt:  { type: "string", description: "Agent instructions" },
+      },
+      required: ["agentId"],
+    },
+  },
+
   {
     name: "ghl_get_attribution_report",
     description: "Aggregate attribution report across all contacts. 'sessionSource' (recommended) reads lastAttributionSource.medium — the most populated field, showing values like Organic Search, Direct traffic, Client Portal, CRM UI. 'tag' groups by contact tags. 'leadSource' reads a Lead Source custom field. 'referrer' shows referring hostnames. 'campaign' reads UTM campaign (sparse unless UTMs are set up).",
@@ -1067,6 +1186,85 @@ async function callTool(name, args) {
       if (sentBy) body.sentBy = sentBy;
       const data = await ghlPost(`/documents/${documentId}/send`, body);
       return data;
+    }
+
+    // ── Tier 2 Write: Opportunities ───────────────────────────────────────────
+    case "ghl_create_opportunity": {
+      const { pipelineId, pipelineStageId, name: oppName, contactId, status = "open", monetaryValue, assignedTo, source, notes } = args;
+      const body = {
+        locationId: LOCATION,
+        pipelineId,
+        pipelineStageId,
+        name: oppName,
+        contactId,
+        status,
+      };
+      if (monetaryValue !== undefined) body.monetaryValue = monetaryValue;
+      if (assignedTo) body.assignedTo = assignedTo;
+      if (source)     body.source     = source;
+      if (notes)      body.notes      = notes;
+      const data = await ghlPost("/opportunities/", body);
+      return data.opportunity || data;
+    }
+
+    case "ghl_update_opportunity": {
+      const { opportunityId, ...fields } = args;
+      const body = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/opportunities/${opportunityId}`, body);
+      return data.opportunity || data;
+    }
+
+    case "ghl_update_opportunity_stage": {
+      const { opportunityId, pipelineStageId } = args;
+      const data = await ghlPut(`/opportunities/${opportunityId}`, { pipelineStageId });
+      return data.opportunity || data;
+    }
+
+    // ── Tier 4 Write: Configuration ───────────────────────────────────────────
+    case "ghl_create_tag": {
+      const data = await ghlPost(`/locations/${LOCATION}/tags`, { name: args.name });
+      return data.tag || data;
+    }
+
+    case "ghl_update_custom_value": {
+      const { customValueId, name: cvName, value } = args;
+      const body = { value };
+      if (cvName) body.name = cvName;
+      const data = await ghlPut(`/locations/${LOCATION}/customValues/${customValueId}`, body);
+      return data.customValue || data;
+    }
+
+    case "ghl_create_custom_field": {
+      const { name: fName, dataType, position, placeholder, options } = args;
+      const body = { name: fName, dataType };
+      if (position !== undefined) body.position = position;
+      if (placeholder) body.placeholder = placeholder;
+      if (options)     body.options     = options;
+      const data = await ghlPost(`/locations/${LOCATION}/customFields`, body);
+      return data.customField || data;
+    }
+
+    case "ghl_update_voice_ai_agent": {
+      const { agentId, ...fields } = args;
+      const body = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/voice-ai/agents/${agentId}`, body);
+      return data.agent || data;
+    }
+
+    case "ghl_update_agent_studio": {
+      const { agentId, ...fields } = args;
+      const body = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/agent-studio/agents/${agentId}`, body);
+      return data.agent || data;
     }
 
     default:

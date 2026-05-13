@@ -3,7 +3,11 @@
     "allow": [
       "Bash(Get-ChildItem c:\\\\Users\\\\david\\\\Downloads\\\\ghl-mcp-remote -Exclude node_modules)",
       "Bash(Select-Object Name)",
-      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\david\\\\Downloads\\\\ghl-mcp-remote\" | Where-Object { $_.Name -ne \"node_modules\" } | Select-Object -ExpandProperty Name)"
+      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\david\\\\Downloads\\\\ghl-mcp-remote\" | Where-Object { $_.Name -ne \"node_modules\" } | Select-Object -ExpandProperty Name)",
+      "Bash(git -C \"c:/Users/david/Downloads/ghl-mcp-remote\" status)",
+      "Bash(git -C \"c:/Users/david/Downloads/ghl-mcp-remote\" log --oneline -5)",
+      "Bash(git -C \"c:/Users/david/Downloads/ghl-mcp-remote\" log -1 --stat)",
+      "Bash(curl -s -X POST https://ghl-mcp-remote.vercel.app/api/mcp -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}')"
     ]
   }
 }
