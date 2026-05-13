@@ -24,6 +24,21 @@ async function ghlPost(path, body) {
   return data;
 }
 
+async function ghlPut(path, body) {
+  const res  = await fetch(`https://services.leadconnectorhq.com${path}`, { method: "PUT", headers: GHL_HEADERS, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || `GHL ${res.status}: ${path}`);
+  return data;
+}
+
+async function ghlDelete(path) {
+  const res = await fetch(`https://services.leadconnectorhq.com${path}`, { method: "DELETE", headers: GHL_HEADERS });
+  if (res.status === 204) return { success: true };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || `GHL ${res.status}: ${path}`);
+  return data;
+}
+
 // ── Tool definitions ──────────────────────────────────────────────────────────
 
 const TOOLS = [
@@ -361,6 +376,173 @@ const TOOLS = [
     description: "Get page count statistics for GHL funnels.",
     inputSchema: { type: "object", properties: {} },
   },
+  // ── Tier 1: Write tools — Daily CRM operations ──────────────────────────────
+  {
+    name: "ghl_create_contact",
+    description: "Create a new contact in GHL. At least one of email/phone is required.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        firstName: { type: "string" },
+        lastName:  { type: "string" },
+        email:     { type: "string" },
+        phone:     { type: "string", description: "E.164 format preferred (+15551234567)" },
+        tags:      { type: "array", items: { type: "string" }, description: "Tags to apply on creation" },
+        source:    { type: "string", description: "Source label (e.g. 'website', 'event signup')" },
+      },
+    },
+  },
+  {
+    name: "ghl_update_contact",
+    description: "Update fields on an existing GHL contact by ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contactId: { type: "string" },
+        firstName: { type: "string" },
+        lastName:  { type: "string" },
+        email:     { type: "string" },
+        phone:     { type: "string" },
+        tags:      { type: "array", items: { type: "string" }, description: "Replaces existing tags" },
+        customFields: { type: "array", description: "Array of {id, value} objects to update custom fields" },
+      },
+      required: ["contactId"],
+    },
+  },
+  {
+    name: "ghl_add_tag_to_contact",
+    description: "Add one or more tags to a contact without removing existing tags.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contactId: { type: "string" },
+        tags:      { type: "array", items: { type: "string" }, description: "Tags to add" },
+      },
+      required: ["contactId", "tags"],
+    },
+  },
+  {
+    name: "ghl_remove_tag_from_contact",
+    description: "Remove one or more tags from a contact.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contactId: { type: "string" },
+        tags:      { type: "array", items: { type: "string" }, description: "Tags to remove" },
+      },
+      required: ["contactId", "tags"],
+    },
+  },
+  {
+    name: "ghl_send_sms",
+    description: "Send an SMS to a contact via GHL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contactId: { type: "string" },
+        message:   { type: "string" },
+      },
+      required: ["contactId", "message"],
+    },
+  },
+  {
+    name: "ghl_send_email",
+    description: "Send an email to a contact via GHL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contactId: { type: "string" },
+        subject:   { type: "string" },
+        html:      { type: "string", description: "HTML body" },
+        text:      { type: "string", description: "Plain text body (used if html omitted)" },
+        emailFrom: { type: "string", description: "From address (optional — uses location default)" },
+      },
+      required: ["contactId", "subject"],
+    },
+  },
+  {
+    name: "ghl_delete_contact",
+    description: "DELETE a contact permanently. Requires confirm:true as a safety check.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contactId: { type: "string" },
+        confirm:   { type: "boolean", description: "Must be true to proceed — prevents accidental deletion" },
+      },
+      required: ["contactId", "confirm"],
+    },
+  },
+
+  // ── Tier 3: Write tools — Content / marketing ───────────────────────────────
+  {
+    name: "ghl_create_blog_post",
+    description: "Create a new blog post in GHL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        blogId:      { type: "string", description: "Parent blog ID (get via ghl_get_blog_posts or ghl_get_blog_categories)" },
+        title:       { type: "string" },
+        rawHTML:     { type: "string", description: "Post body as HTML" },
+        description: { type: "string", description: "Short description / excerpt" },
+        imageUrl:    { type: "string", description: "Featured image URL" },
+        urlSlug:     { type: "string" },
+        author:      { type: "string", description: "Author ID (get via ghl_get_blog_authors)" },
+        categories:  { type: "array", items: { type: "string" }, description: "Category IDs" },
+        tags:        { type: "array", items: { type: "string" } },
+        status:      { type: "string", enum: ["PUBLISHED", "DRAFT", "SCHEDULED"], description: "Default: DRAFT" },
+        publishedAt: { type: "string", description: "ISO date for scheduled posts" },
+      },
+      required: ["blogId", "title", "rawHTML"],
+    },
+  },
+  {
+    name: "ghl_update_blog_post",
+    description: "Update an existing blog post.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        postId:      { type: "string" },
+        blogId:      { type: "string" },
+        title:       { type: "string" },
+        rawHTML:     { type: "string" },
+        description: { type: "string" },
+        imageUrl:    { type: "string" },
+        urlSlug:     { type: "string" },
+        status:      { type: "string", enum: ["PUBLISHED", "DRAFT", "SCHEDULED"] },
+      },
+      required: ["postId", "blogId"],
+    },
+  },
+  {
+    name: "ghl_create_social_post",
+    description: "Schedule a social media post via GHL Social Planner.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        accountIds:  { type: "array", items: { type: "string" }, description: "Social account IDs to post from (get via ghl_get_social_accounts)" },
+        summary:     { type: "string", description: "Post content" },
+        scheduleDate:{ type: "string", description: "ISO datetime for scheduled posts (omit to post now)" },
+        mediaUrls:   { type: "array", items: { type: "string" }, description: "Image/video URLs to attach" },
+        categoryId:  { type: "string" },
+        tags:        { type: "array", items: { type: "string" } },
+      },
+      required: ["accountIds", "summary"],
+    },
+  },
+  {
+    name: "ghl_send_document_link",
+    description: "Send a document or contract signing link to a contact.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        documentId:  { type: "string", description: "Document ID (get via ghl_get_documents)" },
+        contactId:   { type: "string" },
+        sentBy:      { type: "string", description: "User ID of sender (optional)" },
+      },
+      required: ["documentId", "contactId"],
+    },
+  },
+
   {
     name: "ghl_get_attribution_report",
     description: "Aggregate attribution report across all contacts. 'sessionSource' (recommended) reads lastAttributionSource.medium — the most populated field, showing values like Organic Search, Direct traffic, Client Portal, CRM UI. 'tag' groups by contact tags. 'leadSource' reads a Lead Source custom field. 'referrer' shows referring hostnames. 'campaign' reads UTM campaign (sparse unless UTMs are set up).",
@@ -751,6 +933,140 @@ async function callTool(name, args) {
       }
 
       return report;
+    }
+
+    // ── Tier 1 Write: Contacts ────────────────────────────────────────────────
+    case "ghl_create_contact": {
+      const { firstName, lastName, email, phone, tags, source } = args;
+      if (!email && !phone) throw new Error("ghl_create_contact requires at least one of email or phone");
+      const body = { locationId: LOCATION };
+      if (firstName) body.firstName = firstName;
+      if (lastName)  body.lastName  = lastName;
+      if (email)     body.email     = email;
+      if (phone)     body.phone     = phone;
+      if (tags)      body.tags      = tags;
+      if (source)    body.source    = source;
+      const data = await ghlPost("/contacts/", body);
+      return data.contact || data;
+    }
+
+    case "ghl_update_contact": {
+      const { contactId, ...fields } = args;
+      const body = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/contacts/${contactId}`, body);
+      return data.contact || data;
+    }
+
+    case "ghl_add_tag_to_contact": {
+      const { contactId, tags } = args;
+      const data = await ghlPost(`/contacts/${contactId}/tags`, { tags });
+      return data;
+    }
+
+    case "ghl_remove_tag_from_contact": {
+      const { contactId, tags } = args;
+      // GHL's tag-removal endpoint uses DELETE with a body — fetch directly
+      const res = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
+        method: "DELETE",
+        headers: GHL_HEADERS,
+        body: JSON.stringify({ tags }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || `GHL ${res.status}: remove tags`);
+      return data;
+    }
+
+    case "ghl_delete_contact": {
+      const { contactId, confirm } = args;
+      if (confirm !== true) throw new Error("Refusing to delete: pass confirm:true to proceed");
+      return await ghlDelete(`/contacts/${contactId}`);
+    }
+
+    // ── Tier 1 Write: Messaging ───────────────────────────────────────────────
+    case "ghl_send_sms": {
+      const { contactId, message } = args;
+      const data = await ghlPost("/conversations/messages", {
+        type: "SMS",
+        contactId,
+        message,
+      });
+      return data;
+    }
+
+    case "ghl_send_email": {
+      const { contactId, subject, html, text, emailFrom } = args;
+      const body = {
+        type: "Email",
+        contactId,
+        subject,
+      };
+      if (html) body.html = html;
+      if (text) body.message = text;
+      if (emailFrom) body.emailFrom = emailFrom;
+      const data = await ghlPost("/conversations/messages", body);
+      return data;
+    }
+
+    // ── Tier 3 Write: Blog ────────────────────────────────────────────────────
+    case "ghl_create_blog_post": {
+      const { blogId, title, rawHTML, description, imageUrl, urlSlug, author, categories, tags, status = "DRAFT", publishedAt } = args;
+      const body = {
+        locationId: LOCATION,
+        blogId,
+        title,
+        rawHTML,
+        status,
+      };
+      if (description) body.description = description;
+      if (imageUrl)    body.imageUrl    = imageUrl;
+      if (urlSlug)     body.urlSlug     = urlSlug;
+      if (author)      body.author      = author;
+      if (categories)  body.categories  = categories;
+      if (tags)        body.tags        = tags;
+      if (publishedAt) body.publishedAt = publishedAt;
+      const data = await ghlPost("/blogs/posts", body);
+      return data.blogPost || data;
+    }
+
+    case "ghl_update_blog_post": {
+      const { postId, ...fields } = args;
+      const body = { locationId: LOCATION };
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/blogs/posts/${postId}`, body);
+      return data.blogPost || data;
+    }
+
+    // ── Tier 3 Write: Social ──────────────────────────────────────────────────
+    case "ghl_create_social_post": {
+      const { accountIds, summary, scheduleDate, mediaUrls, categoryId, tags } = args;
+      const body = {
+        accountIds,
+        summary,
+        type: scheduleDate ? "scheduled" : "now",
+      };
+      if (scheduleDate) body.scheduleDate = scheduleDate;
+      if (mediaUrls)    body.mediaUrls    = mediaUrls;
+      if (categoryId)   body.categoryId   = categoryId;
+      if (tags)         body.tags         = tags;
+      const data = await ghlPost(`/social-media-posting/${LOCATION}/posts`, body);
+      return data.post || data;
+    }
+
+    // ── Tier 3 Write: Documents ───────────────────────────────────────────────
+    case "ghl_send_document_link": {
+      const { documentId, contactId, sentBy } = args;
+      const body = {
+        locationId: LOCATION,
+        contactId,
+      };
+      if (sentBy) body.sentBy = sentBy;
+      const data = await ghlPost(`/documents/${documentId}/send`, body);
+      return data;
     }
 
     default:
