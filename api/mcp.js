@@ -783,6 +783,344 @@ const TOOLS = [
     },
   },
 
+  // ── Missing Read Tools ──────────────────────────────────────────────────────
+  {
+    name: "ghl_get_blogs",
+    description: "List blog containers (sites) in GHL. Use this to get the blogId needed for ghl_create_blog_post.",
+    inputSchema: {
+      type: "object",
+      properties: { limit: { type: "number", description: "Max results (default 50)" } },
+    },
+  },
+  {
+    name: "ghl_check_blog_slug",
+    description: "Check if a blog post URL slug is available before publishing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        urlSlug: { type: "string" },
+        postId:  { type: "string", description: "Existing post ID to exclude (optional, for updates)" },
+      },
+      required: ["urlSlug"],
+    },
+  },
+  {
+    name: "ghl_get_association_relations",
+    description: "Get relations between custom objects/associations.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        associationId: { type: "string", description: "Filter by association ID (optional)" },
+      },
+    },
+  },
+  {
+    name: "ghl_get_voice_ai_agent_goals",
+    description: "List Voice AI agent goals configured for this location.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentId: { type: "string", description: "Filter by agent ID (optional)" },
+      },
+    },
+  },
+
+  // ── Missing Write Tools ─────────────────────────────────────────────────────
+  {
+    name: "ghl_create_association",
+    description: "Create a new association (custom object relationship type) in GHL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key:         { type: "string", description: "Unique key for the association" },
+        firstObjectLabel:  { type: "string" },
+        firstObjectKey:    { type: "string" },
+        secondObjectLabel: { type: "string" },
+        secondObjectKey:   { type: "string" },
+      },
+      required: ["key", "firstObjectKey", "secondObjectKey"],
+    },
+  },
+  {
+    name: "ghl_create_association_relation",
+    description: "Create a relation between two records using an existing association.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        associationId: { type: "string" },
+        firstRecordId: { type: "string" },
+        secondRecordId:{ type: "string" },
+      },
+      required: ["associationId", "firstRecordId", "secondRecordId"],
+    },
+  },
+  {
+    name: "ghl_create_course",
+    description: "Create a new course in GHL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title:       { type: "string" },
+        description: { type: "string" },
+        isPublished: { type: "boolean", description: "Default: false (draft)" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "ghl_update_course",
+    description: "Update an existing GHL course.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        courseId:    { type: "string" },
+        title:       { type: "string" },
+        description: { type: "string" },
+        isPublished: { type: "boolean" },
+      },
+      required: ["courseId"],
+    },
+  },
+  {
+    name: "ghl_update_form",
+    description: "Update a GHL form's name or settings.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        formId: { type: "string" },
+        name:   { type: "string" },
+      },
+      required: ["formId"],
+    },
+  },
+  {
+    name: "ghl_create_product",
+    description: "Create a new product in GHL (used for order forms / e-commerce).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name:        { type: "string" },
+        productType: { type: "string", enum: ["DIGITAL", "PHYSICAL", "SERVICE"], description: "Default: DIGITAL" },
+        description: { type: "string" },
+        image:       { type: "string", description: "Product image URL" },
+        availableInStore: { type: "boolean" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "ghl_update_product",
+    description: "Update an existing product.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        productId:   { type: "string" },
+        name:        { type: "string" },
+        description: { type: "string" },
+        image:       { type: "string" },
+        availableInStore: { type: "boolean" },
+      },
+      required: ["productId"],
+    },
+  },
+  {
+    name: "ghl_create_product_price",
+    description: "Create a new price for an existing product.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        productId: { type: "string" },
+        name:      { type: "string", description: "Price tier name (e.g. 'Monthly', 'Annual')" },
+        amount:    { type: "number", description: "Price in cents (e.g. 9900 = $99.00)" },
+        currency:  { type: "string", description: "ISO currency code (default: USD)" },
+        type:      { type: "string", enum: ["one_time", "recurring"], description: "Default: one_time" },
+      },
+      required: ["productId", "name", "amount"],
+    },
+  },
+  {
+    name: "ghl_create_product_collection",
+    description: "Create a new product collection (grouping of products).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        slug: { type: "string", description: "URL slug for the collection" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "ghl_update_saas_subscription",
+    description: "Update SaaS subscription settings for a sub-account.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        planId: { type: "string" },
+        status: { type: "string", description: "active, paused, cancelled, etc." },
+      },
+    },
+  },
+  {
+    name: "ghl_create_social_category",
+    description: "Create a new social media post category in GHL Social Planner.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "ghl_create_social_tag",
+    description: "Create a new social media tag in GHL Social Planner.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "ghl_cancel_email_schedule",
+    description: "Cancel a scheduled email send.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        scheduleId: { type: "string" },
+        confirm:    { type: "boolean", description: "Must be true to proceed" },
+      },
+      required: ["scheduleId", "confirm"],
+    },
+  },
+  {
+    name: "ghl_send_document_template_link",
+    description: "Send a contract template signing link to a contact (uses a template).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        templateId: { type: "string", description: "Document template ID (get via ghl_get_document_templates)" },
+        contactId:  { type: "string" },
+      },
+      required: ["templateId", "contactId"],
+    },
+  },
+  {
+    name: "ghl_update_voice_ai_agent_goal",
+    description: "Update a Voice AI agent goal configuration.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goalId:      { type: "string" },
+        name:        { type: "string" },
+        description: { type: "string" },
+        prompt:      { type: "string" },
+      },
+      required: ["goalId"],
+    },
+  },
+  {
+    name: "ghl_update_conversation_ai",
+    description: "Update Conversation AI (bot) settings for this location.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        botId:   { type: "string", description: "Bot/agent ID" },
+        name:    { type: "string" },
+        prompt:  { type: "string", description: "System prompt for the bot" },
+        enabled: { type: "boolean" },
+      },
+    },
+  },
+  {
+    name: "ghl_create_social_oauth_url",
+    description: "Generate an OAuth URL for connecting a new social media integration. Returns a URL the user must visit in their browser to complete the connection.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        platform: { type: "string", enum: ["facebook", "instagram", "google", "linkedin", "tiktok", "twitter"], description: "Social platform to connect" },
+      },
+      required: ["platform"],
+    },
+  },
+
+  // ── Ad Publishing ───────────────────────────────────────────────────────────
+  {
+    name: "ghl_publish_ad",
+    description: "Publish a paid ad through GHL's ad publishing feature (Facebook/Instagram ads).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        accountIds:      { type: "array", items: { type: "string" }, description: "Ad account IDs (get via ghl_get_social_accounts)" },
+        primaryText:     { type: "string", description: "Main ad copy" },
+        headline:        { type: "string", description: "Ad headline" },
+        description:     { type: "string", description: "Ad description" },
+        destinationUrl:  { type: "string", description: "URL the ad clicks through to" },
+        mediaUrls:       { type: "array", items: { type: "string" }, description: "Image/video URLs for the ad creative" },
+        callToAction:    { type: "string", description: "CTA button label (e.g. LEARN_MORE, SIGN_UP, SHOP_NOW)" },
+        budget:          { type: "number", description: "Budget amount" },
+        startDate:       { type: "string", description: "ISO datetime for ad start" },
+        endDate:         { type: "string", description: "ISO datetime for ad end (optional)" },
+      },
+      required: ["accountIds", "primaryText", "destinationUrl"],
+    },
+  },
+
+  // ── Users & Businesses ──────────────────────────────────────────────────────
+  {
+    name: "ghl_get_users",
+    description: "List GHL users (sub-account team members) for this location.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_businesses",
+    description: "List businesses associated with this GHL location.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_create_business",
+    description: "Create a new business record in GHL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name:        { type: "string" },
+        phone:       { type: "string" },
+        email:       { type: "string" },
+        website:     { type: "string" },
+        address:     { type: "string" },
+        city:        { type: "string" },
+        state:       { type: "string" },
+        country:     { type: "string" },
+        postalCode:  { type: "string" },
+        description: { type: "string" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "ghl_update_business",
+    description: "Update an existing business record by ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        businessId:  { type: "string" },
+        name:        { type: "string" },
+        phone:       { type: "string" },
+        email:       { type: "string" },
+        website:     { type: "string" },
+        address:     { type: "string" },
+        city:        { type: "string" },
+        state:       { type: "string" },
+        country:     { type: "string" },
+        postalCode:  { type: "string" },
+        description: { type: "string" },
+      },
+      required: ["businessId"],
+    },
+  },
+
   {
     name: "ghl_get_attribution_report",
     description: "Aggregate attribution report across all contacts. 'sessionSource' (recommended) reads lastAttributionSource.medium — the most populated field, showing values like Organic Search, Direct traffic, Client Portal, CRM UI. 'tag' groups by contact tags. 'leadSource' reads a Lead Source custom field. 'referrer' shows referring hostnames. 'campaign' reads UTM campaign (sparse unless UTMs are set up).",
@@ -1483,6 +1821,253 @@ async function callTool(name, args) {
       if (categoryId)      body.categoryId      = categoryId;
       const data = await ghlPost("/knowledge-base/", body);
       return data.article || data;
+    }
+
+    // ── Missing Read Tools ────────────────────────────────────────────────────
+    case "ghl_get_blogs": {
+      const { limit = 50 } = args;
+      const data = await ghl(`/blogs/site?locationId=${LOCATION}&limit=${limit}&skip=0`);
+      return (data.data || data.blogs || []).map(b => ({
+        id: b._id || b.id,
+        name: b.name || b.title || "",
+        urlSlug: b.urlSlug || "",
+        description: b.description || "",
+      }));
+    }
+
+    case "ghl_check_blog_slug": {
+      const { urlSlug, postId } = args;
+      let url = `/blogs/posts/url-slug-exists?locationId=${LOCATION}&urlSlug=${encodeURIComponent(urlSlug)}`;
+      if (postId) url += `&postId=${postId}`;
+      const data = await ghl(url);
+      return { available: !data.exists, ...data };
+    }
+
+    case "ghl_get_association_relations": {
+      const { associationId } = args;
+      let url = `/associations/relations?locationId=${LOCATION}`;
+      if (associationId) url += `&associationId=${associationId}`;
+      const data = await ghl(url);
+      return data.relations || data;
+    }
+
+    case "ghl_get_voice_ai_agent_goals": {
+      const { agentId } = args;
+      let url = agentId
+        ? `/voice-ai/agents/${agentId}/goals`
+        : `/voice-ai/agent-goals?locationId=${LOCATION}`;
+      const data = await ghl(url);
+      return data.goals || data;
+    }
+
+    // ── Missing Write Tools ───────────────────────────────────────────────────
+    case "ghl_create_association": {
+      const body = { locationId: LOCATION, ...args };
+      const data = await ghlPost("/associations/", body);
+      return data.association || data;
+    }
+
+    case "ghl_create_association_relation": {
+      const body = { locationId: LOCATION, ...args };
+      const data = await ghlPost("/associations/relations", body);
+      return data.relation || data;
+    }
+
+    case "ghl_create_course": {
+      const { title, description, isPublished = false } = args;
+      const body = { locationId: LOCATION, title, isPublished };
+      if (description) body.description = description;
+      const data = await ghlPost("/courses/", body);
+      return data.course || data;
+    }
+
+    case "ghl_update_course": {
+      const { courseId, ...fields } = args;
+      const body = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/courses/${courseId}`, body);
+      return data.course || data;
+    }
+
+    case "ghl_update_form": {
+      const { formId, ...fields } = args;
+      const body = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/forms/${formId}`, body);
+      return data.form || data;
+    }
+
+    case "ghl_create_product": {
+      const { name: pName, productType = "DIGITAL", description, image, availableInStore } = args;
+      const body = { locationId: LOCATION, name: pName, productType };
+      if (description)              body.description       = description;
+      if (image)                    body.image             = image;
+      if (availableInStore !== undefined) body.availableInStore = availableInStore;
+      const data = await ghlPost("/products/", body);
+      return data.product || data;
+    }
+
+    case "ghl_update_product": {
+      const { productId, ...fields } = args;
+      const body = { locationId: LOCATION };
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/products/${productId}`, body);
+      return data.product || data;
+    }
+
+    case "ghl_create_product_price": {
+      const { productId, name: priceName, amount, currency = "USD", type = "one_time" } = args;
+      const body = {
+        locationId: LOCATION,
+        name: priceName,
+        amount,
+        currency,
+        type,
+      };
+      const data = await ghlPost(`/products/${productId}/price`, body);
+      return data.price || data;
+    }
+
+    case "ghl_create_product_collection": {
+      const { name: cName, slug } = args;
+      const body = { locationId: LOCATION, name: cName };
+      if (slug) body.slug = slug;
+      const data = await ghlPost("/products/collections/", body);
+      return data.collection || data;
+    }
+
+    case "ghl_update_saas_subscription": {
+      const body = {};
+      for (const [k, v] of Object.entries(args)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/saas/location/${LOCATION}`, body);
+      return data;
+    }
+
+    case "ghl_create_social_category": {
+      const data = await ghlPost(`/social-media-posting/categories?locationId=${LOCATION}`, { name: args.name });
+      return data.category || data;
+    }
+
+    case "ghl_create_social_tag": {
+      const data = await ghlPost(`/social-media-posting/tags?locationId=${LOCATION}`, { name: args.name });
+      return data.tag || data;
+    }
+
+    case "ghl_cancel_email_schedule": {
+      const { scheduleId, confirm } = args;
+      if (confirm !== true) throw new Error("Refusing to cancel: pass confirm:true to proceed");
+      return await ghlDelete(`/emails/schedule/${scheduleId}`);
+    }
+
+    case "ghl_send_document_template_link": {
+      const { templateId, contactId } = args;
+      const data = await ghlPost(`/documents/templates/${templateId}/send`, {
+        locationId: LOCATION,
+        contactId,
+      });
+      return data;
+    }
+
+    case "ghl_update_voice_ai_agent_goal": {
+      const { goalId, ...fields } = args;
+      const body = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/voice-ai/goals/${goalId}`, body);
+      return data.goal || data;
+    }
+
+    case "ghl_update_conversation_ai": {
+      const body = { locationId: LOCATION };
+      for (const [k, v] of Object.entries(args)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/conversation-ai/settings`, body);
+      return data.settings || data;
+    }
+
+    case "ghl_create_social_oauth_url": {
+      const { platform } = args;
+      // GHL returns an OAuth start URL that the user opens in a browser
+      const data = await ghl(`/social-media-posting/oauth/${platform}/start?locationId=${LOCATION}`);
+      return {
+        platform,
+        oauthUrl: data.url || data.oauthUrl || data,
+        instructions: "Open this URL in a browser to complete the OAuth connection. Once authorized, the social account will appear in ghl_get_social_accounts.",
+      };
+    }
+
+    // ── Ad Publishing ─────────────────────────────────────────────────────────
+    case "ghl_publish_ad": {
+      const { accountIds, primaryText, headline, description, destinationUrl, mediaUrls, callToAction, budget, startDate, endDate } = args;
+      const body = {
+        locationId: LOCATION,
+        accountIds,
+        primaryText,
+        destinationUrl,
+      };
+      if (headline)       body.headline       = headline;
+      if (description)    body.description    = description;
+      if (mediaUrls)      body.mediaUrls      = mediaUrls;
+      if (callToAction)   body.callToAction   = callToAction;
+      if (budget)         body.budget         = budget;
+      if (startDate)      body.startDate      = startDate;
+      if (endDate)        body.endDate        = endDate;
+      const data = await ghlPost(`/ad-publishing/${LOCATION}/ads`, body);
+      return data.ad || data;
+    }
+
+    // ── Users & Businesses ────────────────────────────────────────────────────
+    case "ghl_get_users": {
+      const data = await ghl(`/users/search?companyId=&locationId=${LOCATION}`);
+      return (data.users || []).map(u => ({
+        id: u.id,
+        name: `${u.firstName || ""} ${u.lastName || ""}`.trim(),
+        email: u.email || "",
+        phone: u.phone || "",
+        role: u.roles?.role || u.role || "",
+        type: u.type || "",
+      }));
+    }
+
+    case "ghl_get_businesses": {
+      const data = await ghl(`/businesses/?locationId=${LOCATION}`);
+      return (data.businesses || []).map(b => ({
+        id: b.id,
+        name: b.name,
+        phone: b.phone || "",
+        email: b.email || "",
+        website: b.website || "",
+        address: b.address || "",
+      }));
+    }
+
+    case "ghl_create_business": {
+      const body = { locationId: LOCATION };
+      for (const [k, v] of Object.entries(args)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPost("/businesses/", body);
+      return data.business || data;
+    }
+
+    case "ghl_update_business": {
+      const { businessId, ...fields } = args;
+      const body = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/businesses/${businessId}`, body);
+      return data.business || data;
     }
 
     default:
