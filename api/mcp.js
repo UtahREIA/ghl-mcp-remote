@@ -1185,7 +1185,19 @@ async function callTool(name, args) {
     case "ghl_get_conversation_messages": {
       const { conversationId, limit = 20 } = args;
       const data = await ghl(`/conversations/${conversationId}/messages?limit=${limit}`);
-      return (data.messages || []).map(m => ({ id: m.id, type: m.messageType || m.type, body: m.body || m.text || "", direction: m.direction, dateAdded: m.dateAdded }));
+      // GHL returns one of: { messages: [...] }  OR  { messages: { messages: [...], lastMessageId, nextPage } }
+      const msgs = Array.isArray(data.messages)
+        ? data.messages
+        : (data.messages?.messages || Object.values(data.messages || {}).filter(v => v && typeof v === "object" && v.id));
+      return msgs.map(m => ({
+        id: m.id,
+        type: m.messageType || m.type,
+        body: m.body || m.text || "",
+        subject: m.subject || "",
+        direction: m.direction,
+        status: m.status || "",
+        dateAdded: m.dateAdded,
+      }));
     }
     case "ghl_get_opportunities": {
       const { pipelineId, status = "open", limit = 20 } = args;
