@@ -783,6 +783,117 @@ const TOOLS = [
     },
   },
 
+  // ── Custom Objects ──────────────────────────────────────────────────────────
+  {
+    name: "ghl_get_object_schemas",
+    description: "List all custom object schemas defined for this GHL location (e.g. Properties, Vehicles, Investments).",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_get_object_schema",
+    description: "Get full schema details for a specific custom object type, including all fields.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        objectKey: { type: "string", description: "Schema key (e.g. 'custom_objects.property')" },
+      },
+      required: ["objectKey"],
+    },
+  },
+  {
+    name: "ghl_create_object_schema",
+    description: "Create a new custom object schema (data type definition) in GHL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        labels:       { type: "object", description: "Object labels, e.g. { singular: 'Property', plural: 'Properties' }" },
+        key:          { type: "string", description: "Unique key (e.g. 'property')" },
+        description:  { type: "string" },
+        primaryDisplayProperty: { type: "string", description: "Field key used as the record's display name" },
+      },
+      required: ["labels", "key"],
+    },
+  },
+  {
+    name: "ghl_update_object_schema",
+    description: "Update an existing custom object schema.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        objectKey:    { type: "string" },
+        labels:       { type: "object" },
+        description:  { type: "string" },
+        primaryDisplayProperty: { type: "string" },
+      },
+      required: ["objectKey"],
+    },
+  },
+  {
+    name: "ghl_get_object_records",
+    description: "Search/list records inside a custom object type.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        objectKey:  { type: "string", description: "Object schema key (e.g. 'custom_objects.property')" },
+        query:      { type: "string", description: "Search query (optional)" },
+        limit:      { type: "number", description: "Max results (default 20)" },
+      },
+      required: ["objectKey"],
+    },
+  },
+  {
+    name: "ghl_get_object_record",
+    description: "Get a single custom object record by ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        objectKey: { type: "string" },
+        recordId:  { type: "string" },
+      },
+      required: ["objectKey", "recordId"],
+    },
+  },
+  {
+    name: "ghl_create_object_record",
+    description: "Create a new record inside a custom object type.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        objectKey:  { type: "string", description: "Object schema key" },
+        properties: { type: "object", description: "Record field values, e.g. { address: '123 Main St', price: 250000 }" },
+        owner:      { type: "array", items: { type: "string" }, description: "Owner user IDs (optional)" },
+        followers:  { type: "array", items: { type: "string" }, description: "Follower user IDs (optional)" },
+      },
+      required: ["objectKey", "properties"],
+    },
+  },
+  {
+    name: "ghl_update_object_record",
+    description: "Update fields on an existing custom object record.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        objectKey:  { type: "string" },
+        recordId:   { type: "string" },
+        properties: { type: "object", description: "Field values to update" },
+      },
+      required: ["objectKey", "recordId", "properties"],
+    },
+  },
+  {
+    name: "ghl_delete_object_record",
+    description: "Delete a custom object record. Requires confirm:true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        objectKey: { type: "string" },
+        recordId:  { type: "string" },
+        confirm:   { type: "boolean", description: "Must be true to proceed" },
+      },
+      required: ["objectKey", "recordId", "confirm"],
+    },
+  },
+
   // ── Missing Read Tools ──────────────────────────────────────────────────────
   {
     name: "ghl_get_blogs",
@@ -1833,6 +1944,89 @@ async function callTool(name, args) {
       if (categoryId)      body.categoryId      = categoryId;
       const data = await ghlPost("/knowledge-base/", body);
       return data.article || data;
+    }
+
+    // ── Custom Objects ────────────────────────────────────────────────────────
+    case "ghl_get_object_schemas": {
+      const data = await ghl(`/objects/?locationId=${LOCATION}`);
+      return (data.objects || data.schemas || []).map(o => ({
+        id:          o.id,
+        key:         o.key,
+        labels:      o.labels,
+        description: o.description || "",
+        primaryDisplayProperty: o.primaryDisplayProperty || "",
+      }));
+    }
+
+    case "ghl_get_object_schema": {
+      const { objectKey } = args;
+      const data = await ghl(`/objects/${objectKey}?locationId=${LOCATION}&fetchProperties=true`);
+      return data.object || data;
+    }
+
+    case "ghl_create_object_schema": {
+      const body = { locationId: LOCATION, ...args };
+      const data = await ghlPost(`/objects/`, body);
+      return data.object || data;
+    }
+
+    case "ghl_update_object_schema": {
+      const { objectKey, ...fields } = args;
+      const body = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/objects/${objectKey}`, body);
+      return data.object || data;
+    }
+
+    case "ghl_get_object_records": {
+      const { objectKey, query, limit = 20 } = args;
+      const body = {
+        locationId: LOCATION,
+        page: 1,
+        pageLimit: limit,
+      };
+      if (query) body.query = query;
+      const data = await ghlPost(`/objects/${objectKey}/records/search`, body);
+      return (data.records || []).map(r => ({
+        id: r.id,
+        objectKey: r.objectKey || objectKey,
+        properties: r.properties || {},
+        owner: r.owner || [],
+        followers: r.followers || [],
+        createdAt: r.createdAt,
+      }));
+    }
+
+    case "ghl_get_object_record": {
+      const { objectKey, recordId } = args;
+      const data = await ghl(`/objects/${objectKey}/records/${recordId}?locationId=${LOCATION}`);
+      return data.record || data;
+    }
+
+    case "ghl_create_object_record": {
+      const { objectKey, properties, owner, followers } = args;
+      const body = {
+        locationId: LOCATION,
+        properties,
+      };
+      if (owner)     body.owner     = owner;
+      if (followers) body.followers = followers;
+      const data = await ghlPost(`/objects/${objectKey}/records`, body);
+      return data.record || data;
+    }
+
+    case "ghl_update_object_record": {
+      const { objectKey, recordId, properties } = args;
+      const data = await ghlPut(`/objects/${objectKey}/records/${recordId}?locationId=${LOCATION}`, { properties });
+      return data.record || data;
+    }
+
+    case "ghl_delete_object_record": {
+      const { objectKey, recordId, confirm } = args;
+      if (confirm !== true) throw new Error("Refusing to delete: pass confirm:true to proceed");
+      return await ghlDelete(`/objects/${objectKey}/records/${recordId}?locationId=${LOCATION}`);
     }
 
     // ── Missing Read Tools ────────────────────────────────────────────────────
