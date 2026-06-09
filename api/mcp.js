@@ -39,6 +39,20 @@ async function ghlDelete(path) {
   return data;
 }
 
+// Try multiple GET paths, return first successful result. Used for endpoints
+// where GHL's documented path varies or the v2 path is undocumented.
+async function ghlTry(paths) {
+  const errors = [];
+  for (const path of paths) {
+    try {
+      return await ghl(path);
+    } catch (e) {
+      errors.push(`${path}: ${e.message}`);
+    }
+  }
+  throw new Error(`All paths failed. Tried:\n${errors.join("\n")}`);
+}
+
 // ── Tool definitions ──────────────────────────────────────────────────────────
 
 const TOOLS = [
@@ -781,6 +795,13 @@ const TOOLS = [
       },
       required: ["title", "content"],
     },
+  },
+
+  // ── Phone Numbers ───────────────────────────────────────────────────────────
+  {
+    name: "ghl_get_phone_numbers",
+    description: "List all phone numbers for this GHL location. Returns call routing config (incoming call action, no-answer behavior, ring timeout) — useful for debugging voicemail leakage on Voice AI numbers.",
+    inputSchema: { type: "object", properties: {} },
   },
 
   // ── Custom Objects ──────────────────────────────────────────────────────────
@@ -1526,7 +1547,12 @@ async function callTool(name, args) {
 
     // ── Conversation AI ───────────────────────────────────────────────────────
     case "ghl_get_conversation_ai": {
-      const data = await ghl(`/conversation-ai/settings?locationId=${LOCATION}`);
+      const data = await ghlTry([
+        `/conversation-ai/bot?locationId=${LOCATION}`,
+        `/conversation-ai/bots?locationId=${LOCATION}`,
+        `/conversation-ai/?locationId=${LOCATION}`,
+        `/conversation-ai/settings?locationId=${LOCATION}`,
+      ]);
       return data.bots || data.settings || data;
     }
 
@@ -1542,8 +1568,31 @@ async function callTool(name, args) {
       return (data.agents || []).map(a => ({ id: a.id, name: a.name, status: a.status, voiceId: a.voiceId }));
     }
     case "ghl_get_voice_ai_dashboard": {
-      const data = await ghl(`/voice-ai/dashboard?locationId=${LOCATION}`);
-      return data.stats || data.dashboard || data;
+      // GHL doesn't expose a single dashboard endpoint — synthesize from agents data
+      // plus try a few candidate paths in case GHL adds one later.
+      try {
+        const data = await ghlTry([
+          `/voice-ai/dashboard/page?locationId=${LOCATION}`,
+          `/voice-ai/analytics?locationId=${LOCATION}`,
+          `/voice-ai/stats?locationId=${LOCATION}`,
+        ]);
+        return data.stats || data.dashboard || data;
+      } catch {
+        // Fallback: build a synthetic dashboard from agents list
+        const agentsData = await ghl(`/voice-ai/agents?locationId=${LOCATION}`);
+        const agents = agentsData.agents || [];
+        return {
+          note: "GHL does not expose a Voice AI dashboard REST endpoint. Synthesized from agents list.",
+          totalAgents: agents.length,
+          agents: agents.map(a => ({
+            id: a.id,
+            name: a.name,
+            status: a.status,
+            voiceId: a.voiceId,
+            isPublished: a.isPublished || a.status === "active" || a.status === "published",
+          })),
+        };
+      }
     }
 
     // ── Knowledge Base ────────────────────────────────────────────────────────
@@ -1946,6 +1995,30 @@ async function callTool(name, args) {
       return data.article || data;
     }
 
+    // ── Phone Numbers ─────────────────────────────────────────────────────────
+    case "ghl_get_phone_numbers": {
+      // Try multiple GHL endpoint patterns for phone number listing
+      const data = await ghlTry([
+        `/phone-system/numbers?locationId=${LOCATION}`,
+        `/phone-numbers/?locationId=${LOCATION}`,
+        `/locations/${LOCATION}/phone-numbers`,
+      ]);
+      const numbers = data.numbers || data.phoneNumbers || data.data || [];
+      return numbers.map(n => ({
+        id:                n.id || n._id,
+        phoneNumber:       n.phoneNumber || n.number,
+        friendlyName:      n.friendlyName || n.name || "",
+        capabilities:      n.capabilities || {},
+        incomingCallAction:n.incomingCallAction || n.callActions?.incoming || "",
+        noAnswerAction:    n.noAnswerAction || n.callActions?.noAnswer || "",
+        ringTimeoutSeconds:n.ringTimeoutSeconds || n.timeout || n.ringTimeout || null,
+        forwardToNumber:   n.forwardToNumber || "",
+        voiceAiAgentId:    n.voiceAiAgentId || n.aiAgentId || "",
+        smsEnabled:        n.smsEnabled,
+        voiceEnabled:      n.voiceEnabled,
+      }));
+    }
+
     // ── Custom Objects ────────────────────────────────────────────────────────
     case "ghl_get_object_schemas": {
       const data = await ghl(`/objects/?locationId=${LOCATION}`);
@@ -2059,10 +2132,18 @@ async function callTool(name, args) {
 
     case "ghl_get_voice_ai_agent_goals": {
       const { agentId } = args;
-      let url = agentId
-        ? `/voice-ai/agents/${agentId}/goals`
-        : `/voice-ai/agent-goals?locationId=${LOCATION}`;
-      const data = await ghl(url);
+      // GHL goals are typically per-agent — try several path patterns
+      const paths = agentId
+        ? [
+            `/voice-ai/agents/${agentId}/goals`,
+            `/voice-ai/goals?agentId=${agentId}&locationId=${LOCATION}`,
+            `/voice-ai/agent-goals?agentId=${agentId}&locationId=${LOCATION}`,
+          ]
+        : [
+            `/voice-ai/goals?locationId=${LOCATION}`,
+            `/voice-ai/agent-goals?locationId=${LOCATION}`,
+          ];
+      const data = await ghlTry(paths);
       return data.goals || data;
     }
 
