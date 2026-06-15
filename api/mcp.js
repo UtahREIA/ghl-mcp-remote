@@ -797,6 +797,74 @@ const TOOLS = [
     },
   },
 
+  // ── Social Planner — Comments, OAuth, CSV, Account Edits ────────────────────
+  {
+    name: "ghl_get_social_integrations",
+    description: "List OAuth-connected social media integrations (Facebook, Instagram, LinkedIn, etc.) for this GHL location.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_update_social_account",
+    description: "Update settings on a connected social media account (display name, default category, etc.).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        accountId:   { type: "string", description: "Account ID from ghl_get_social_accounts" },
+        name:        { type: "string" },
+        defaultCategoryId: { type: "string" },
+        active:      { type: "boolean" },
+      },
+      required: ["accountId"],
+    },
+  },
+  {
+    name: "ghl_get_social_csv",
+    description: "List CSV bulk upload jobs for social media posts in GHL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max results (default 20)" },
+      },
+    },
+  },
+  {
+    name: "ghl_upload_social_csv",
+    description: "Bulk-upload social media posts via a hosted CSV file URL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        hostedCsvUrl: { type: "string", description: "Public URL to CSV file with columns: content, mediaUrl, scheduledAt, accountIds" },
+        name:         { type: "string", description: "Optional label for the upload batch" },
+      },
+      required: ["hostedCsvUrl"],
+    },
+  },
+  {
+    name: "ghl_get_social_comments",
+    description: "Get comments on a social media post for engagement analysis or automated reply.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        postId: { type: "string", description: "Social post ID from ghl_get_social_posts" },
+        limit:  { type: "number", description: "Max results (default 50)" },
+      },
+      required: ["postId"],
+    },
+  },
+  {
+    name: "ghl_reply_social_comment",
+    description: "Reply to a comment on a social media post. Used by automation to engage with audience based on Comments Strategy SOP.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        postId:    { type: "string" },
+        commentId: { type: "string", description: "Comment ID to reply to" },
+        message:   { type: "string", description: "Reply text" },
+      },
+      required: ["postId", "commentId", "message"],
+    },
+  },
+
   // ── Phone Numbers ───────────────────────────────────────────────────────────
   {
     name: "ghl_get_phone_numbers",
@@ -1993,6 +2061,69 @@ async function callTool(name, args) {
       if (categoryId)      body.categoryId      = categoryId;
       const data = await ghlPost("/knowledge-base/", body);
       return data.article || data;
+    }
+
+    // ── Social Planner Extra ──────────────────────────────────────────────────
+    case "ghl_get_social_integrations": {
+      const data = await ghlTry([
+        `/social-media-posting/oauth/list?locationId=${LOCATION}`,
+        `/social-media-posting/integrations?locationId=${LOCATION}`,
+        `/social-media-posting/oauth?locationId=${LOCATION}`,
+      ]);
+      return data.integrations || data.oauths || data;
+    }
+
+    case "ghl_update_social_account": {
+      const { accountId, ...fields } = args;
+      const body = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/social-media-posting/accounts/${accountId}?locationId=${LOCATION}`, body);
+      return data.account || data;
+    }
+
+    case "ghl_get_social_csv": {
+      const { limit = 20 } = args;
+      const data = await ghlTry([
+        `/social-media-posting/csv?locationId=${LOCATION}&limit=${limit}`,
+        `/social-media-posting/${LOCATION}/csv?limit=${limit}`,
+      ]);
+      return data.uploads || data.csv || data;
+    }
+
+    case "ghl_upload_social_csv": {
+      const { hostedCsvUrl, name: csvName } = args;
+      const body = { locationId: LOCATION, fileUrl: hostedCsvUrl };
+      if (csvName) body.name = csvName;
+      const data = await ghlPost(`/social-media-posting/csv`, body);
+      return data;
+    }
+
+    case "ghl_get_social_comments": {
+      const { postId, limit = 50 } = args;
+      const data = await ghlTry([
+        `/social-media-posting/posts/${postId}/comments?locationId=${LOCATION}&limit=${limit}`,
+        `/social-media-posting/${LOCATION}/posts/${postId}/comments?limit=${limit}`,
+      ]);
+      return (data.comments || []).map(c => ({
+        id:          c.id || c._id,
+        message:     c.message || c.text || "",
+        author:      c.author || c.from?.name || "",
+        platform:    c.platform || "",
+        likeCount:   c.likeCount || 0,
+        replyCount:  c.replyCount || 0,
+        createdAt:   c.createdAt || c.timestamp,
+      }));
+    }
+
+    case "ghl_reply_social_comment": {
+      const { postId, commentId, message } = args;
+      const data = await ghlPost(`/social-media-posting/posts/${postId}/comments/${commentId}/reply`, {
+        locationId: LOCATION,
+        message,
+      });
+      return data;
     }
 
     // ── Phone Numbers ─────────────────────────────────────────────────────────
