@@ -1471,19 +1471,25 @@ async function callTool(name, args) {
           limit,
           skip: 0,
         });
-      } catch {
-        data = await ghlTry([
-          `/social-media-posting/posts?locationId=${LOCATION}&limit=${limit}`,
-          `/social-media-posting/posts/list?locationId=${LOCATION}&limit=${limit}`,
-        ]);
+      } catch (e1) {
+        try {
+          // Alternative: filter object with various fields GHL expects
+          data = await ghlPost(`/social-media-posting/${LOCATION}/posts/list`, {
+            limit,
+            skip: 0,
+            includeUsers: true,
+          });
+        } catch (e2) {
+          throw new Error(`Social posts list failed. Attempts:\n1. ${e1.message}\n2. ${e2.message}`);
+        }
       }
-      return (data.posts || data.data || []).map(p => ({
+      return (data.posts || data.data || data.results || []).map(p => ({
         id: p.id || p._id,
-        content: p.summary || p.content || "",
+        content: p.summary || p.content || p.text || "",
         platform: p.platform || "",
         accountIds: p.accountIds || p.accounts || [],
-        scheduledAt: p.scheduledAt || "",
-        status: p.status || "",
+        scheduledAt: p.scheduledAt || p.publishAt || "",
+        status: p.status || p.state || "",
       }));
     }
     case "ghl_get_workflows": {
@@ -1589,17 +1595,33 @@ async function callTool(name, args) {
 
     // ── Social Media Planner ──────────────────────────────────────────────────
     case "ghl_get_social_accounts": {
-      // GHL uses path-style locationId for most social-media-posting endpoints
       const data = await ghlTry([
         `/social-media-posting/${LOCATION}/accounts`,
         `/social-media-posting/accounts?locationId=${LOCATION}`,
-        `/social-media-posting/${LOCATION}/accounts/list`,
       ]);
-      return (data.accounts || data.results || []).map(a => ({
+      // GHL's social accounts response often groups by platform — flatten everything
+      // into a single array regardless of response shape.
+      let accounts = [];
+      if (Array.isArray(data)) {
+        accounts = data;
+      } else if (Array.isArray(data.accounts)) {
+        accounts = data.accounts;
+      } else if (Array.isArray(data.results)) {
+        accounts = data.results;
+      } else if (data.accounts && typeof data.accounts === "object") {
+        // Shape: { accounts: { facebook: [...], instagram: [...], linkedin: [...] } }
+        accounts = Object.entries(data.accounts).flatMap(([platform, list]) =>
+          (Array.isArray(list) ? list : []).map(a => ({ ...a, platform: a.platform || platform }))
+        );
+      } else {
+        // Unknown shape — return raw so caller can inspect
+        return { _rawResponse: data, _note: "Response shape not recognized — inspect _rawResponse to identify account format" };
+      }
+      return accounts.map(a => ({
         id: a.id || a._id,
-        name: a.name || a.displayName || "",
+        name: a.name || a.displayName || a.pageName || "",
         platform: a.platform || a.type || "",
-        username: a.username || a.handle || "",
+        username: a.username || a.handle || a.pageId || "",
         active: a.active !== false,
       }));
     }
@@ -1618,13 +1640,41 @@ async function callTool(name, args) {
       return data.tags || data;
     }
     case "ghl_get_social_stats": {
-      const data = await ghlTry([
-        `/social-media-posting/${LOCATION}/statistics`,
-        `/social-media-posting/${LOCATION}/stats`,
-        `/social-media-posting/stats?locationId=${LOCATION}`,
-        `/social-media-posting/statistics?locationId=${LOCATION}`,
-      ]);
-      return data.stats || data.statistics || data;
+      // GHL likely doesn't have a direct "stats" endpoint via REST.
+      // Aggregate from posts list as a fallback.
+      try {
+        const data = await ghlTry([
+          `/social-media-posting/${LOCATION}/csv/list`,
+          `/social-media-posting/${LOCATION}/oauth/list`,
+        ]);
+        return data;
+      } catch {
+        // Fallback: synthesize basic stats from the posts list
+        try {
+          const postsData = await ghlPost(`/social-media-posting/${LOCATION}/posts/list`, {
+            type: "post",
+            limit: 100,
+            skip: 0,
+          });
+          const posts = postsData.posts || postsData.data || [];
+          const byPlatform = {};
+          const byStatus = {};
+          for (const p of posts) {
+            const platform = p.platform || "unknown";
+            const status = p.status || "unknown";
+            byPlatform[platform] = (byPlatform[platform] || 0) + 1;
+            byStatus[status] = (byStatus[status] || 0) + 1;
+          }
+          return {
+            note: "GHL does not expose a direct stats REST endpoint. Synthesized from posts list (last 100 posts).",
+            totalPosts: posts.length,
+            byPlatform,
+            byStatus,
+          };
+        } catch (e) {
+          throw new Error(`No social stats endpoint available and posts fallback failed: ${e.message}`);
+        }
+      }
     }
 
     // ── Blog ──────────────────────────────────────────────────────────────────
