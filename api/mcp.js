@@ -1463,8 +1463,28 @@ async function callTool(name, args) {
     }
     case "ghl_get_social_posts": {
       const { limit = 20 } = args;
-      const data = await ghl(`/social-media-posting/${LOCATION}/posts?limit=${limit}`);
-      return (data.posts || data.data || []).map(p => ({ id: p.id, content: p.summary || p.content || "", platform: p.platform || "", scheduledAt: p.scheduledAt || "", status: p.status || "" }));
+      // GHL uses POST + body for listing social posts (similar to /contacts/search pattern)
+      let data;
+      try {
+        data = await ghlPost(`/social-media-posting/${LOCATION}/posts/list`, {
+          type: "post",
+          limit,
+          skip: 0,
+        });
+      } catch {
+        data = await ghlTry([
+          `/social-media-posting/posts?locationId=${LOCATION}&limit=${limit}`,
+          `/social-media-posting/posts/list?locationId=${LOCATION}&limit=${limit}`,
+        ]);
+      }
+      return (data.posts || data.data || []).map(p => ({
+        id: p.id || p._id,
+        content: p.summary || p.content || "",
+        platform: p.platform || "",
+        accountIds: p.accountIds || p.accounts || [],
+        scheduledAt: p.scheduledAt || "",
+        status: p.status || "",
+      }));
     }
     case "ghl_get_workflows": {
       const data = await ghl(`/workflows/?locationId=${LOCATION}`);
@@ -1569,20 +1589,42 @@ async function callTool(name, args) {
 
     // ── Social Media Planner ──────────────────────────────────────────────────
     case "ghl_get_social_accounts": {
-      const data = await ghl(`/social-media-posting/accounts?locationId=${LOCATION}`);
-      return (data.accounts || []).map(a => ({ id: a.id, name: a.name, platform: a.platform, username: a.username }));
+      // GHL uses path-style locationId for most social-media-posting endpoints
+      const data = await ghlTry([
+        `/social-media-posting/${LOCATION}/accounts`,
+        `/social-media-posting/accounts?locationId=${LOCATION}`,
+        `/social-media-posting/${LOCATION}/accounts/list`,
+      ]);
+      return (data.accounts || data.results || []).map(a => ({
+        id: a.id || a._id,
+        name: a.name || a.displayName || "",
+        platform: a.platform || a.type || "",
+        username: a.username || a.handle || "",
+        active: a.active !== false,
+      }));
     }
     case "ghl_get_social_categories": {
-      const data = await ghl(`/social-media-posting/categories?locationId=${LOCATION}`);
+      const data = await ghlTry([
+        `/social-media-posting/${LOCATION}/categories`,
+        `/social-media-posting/categories?locationId=${LOCATION}`,
+      ]);
       return data.categories || data;
     }
     case "ghl_get_social_tags": {
-      const data = await ghl(`/social-media-posting/tags?locationId=${LOCATION}`);
+      const data = await ghlTry([
+        `/social-media-posting/${LOCATION}/tags`,
+        `/social-media-posting/tags?locationId=${LOCATION}`,
+      ]);
       return data.tags || data;
     }
     case "ghl_get_social_stats": {
-      const data = await ghl(`/social-media-posting/stats?locationId=${LOCATION}`);
-      return data.stats || data;
+      const data = await ghlTry([
+        `/social-media-posting/${LOCATION}/statistics`,
+        `/social-media-posting/${LOCATION}/stats`,
+        `/social-media-posting/stats?locationId=${LOCATION}`,
+        `/social-media-posting/statistics?locationId=${LOCATION}`,
+      ]);
+      return data.stats || data.statistics || data;
     }
 
     // ── Blog ──────────────────────────────────────────────────────────────────
