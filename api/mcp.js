@@ -605,7 +605,7 @@ const TOOLS = [
       required: ["opportunityId", "pipelineStageId"],
     },
   },
-
+  //
   // ── Tier 4: Write tools — Configuration ─────────────────────────────────────
   {
     name: "ghl_create_tag",
