@@ -1450,8 +1450,69 @@ async function callTool(name, args) {
       return (data.campaigns || []).map(c => ({ id: c.id, name: c.name, status: c.status || "", type: c.campaignType || "" }));
     }
     case "ghl_get_email_templates": {
-      const data = await ghl(`/emails/builder?locationId=${LOCATION}&limit=50`);
-      return (data.templates || data.data || []).map(t => ({ id: t.id, name: t.name || t.title || "", updatedAt: t.updatedAt || "" }));
+      // GHL's /emails/builder returns top-level items only. Templates can live
+      // inside folders (parentId). Walk the tree to surface all templates.
+      const allTemplates = [];
+      const seenIds = new Set();
+
+      async function fetchFolder(parentId) {
+        let qs = `locationId=${LOCATION}&limit=100`;
+        if (parentId) qs += `&parentId=${parentId}`;
+        let data;
+        try {
+          data = await ghl(`/emails/builder?${qs}`);
+        } catch {
+          return;
+        }
+        const items = data.templates || data.data || data.items || [];
+        for (const item of items) {
+          const id = item.id || item._id;
+          if (!id || seenIds.has(id)) continue;
+          seenIds.add(id);
+          // Folder → recurse into it
+          if (item.type === "folder" || item.isFolder || item.kind === "folder") {
+            await fetchFolder(id);
+          } else {
+            // Template → collect
+            allTemplates.push({
+              id,
+              name:        item.name || item.title || "",
+              subject:     item.subject || "",
+              parentId:    item.parentId || parentId || null,
+              updatedAt:   item.updatedAt || item.dateUpdated || "",
+              createdAt:   item.createdAt || item.dateAdded || "",
+            });
+          }
+        }
+      }
+
+      await fetchFolder(null);
+
+      // Fallback: if recursion found nothing, try the explicit "show all" variants
+      if (allTemplates.length === 0) {
+        try {
+          const data = await ghlTry([
+            `/emails/builder?locationId=${LOCATION}&limit=100&showAll=true`,
+            `/emails/builder/list?locationId=${LOCATION}&limit=100`,
+            `/marketing/email-templates?locationId=${LOCATION}&limit=100`,
+          ]);
+          const items = data.templates || data.data || data.items || [];
+          for (const t of items) {
+            allTemplates.push({
+              id:        t.id || t._id,
+              name:      t.name || t.title || "",
+              subject:   t.subject || "",
+              parentId:  t.parentId || null,
+              updatedAt: t.updatedAt || "",
+              createdAt: t.createdAt || "",
+            });
+          }
+        } catch {
+          // Endpoints don't exist — return whatever we have
+        }
+      }
+
+      return { count: allTemplates.length, templates: allTemplates };
     }
     case "ghl_get_surveys": {
       const data = await ghl(`/surveys/?locationId=${LOCATION}`);
@@ -1701,8 +1762,65 @@ async function callTool(name, args) {
 
     // ── LC Email ──────────────────────────────────────────────────────────────
     case "ghl_get_lc_email": {
-      const data = await ghl(`/email-isv/verify?locationId=${LOCATION}`);
-      return data;
+      const { limit = 20 } = args;
+      // Fetch LC Email campaigns + aggregate stats. The original /email-isv/verify
+      // was the wrong endpoint (that's email address validation, not campaign data).
+      let campaigns = [];
+      let stats = null;
+
+      // Try multiple campaign endpoints
+      try {
+        const campData = await ghlTry([
+          `/marketing/emails/campaigns?locationId=${LOCATION}&limit=${limit}`,
+          `/marketing/email/campaigns?locationId=${LOCATION}&limit=${limit}`,
+          `/emails/campaigns?locationId=${LOCATION}&limit=${limit}`,
+        ]);
+        campaigns = (campData.campaigns || campData.data || campData.schedules || []).map(c => ({
+          id:          c.id || c._id,
+          name:        c.name || c.title || "",
+          status:      c.status || c.state || "",
+          subject:     c.subject || "",
+          sentCount:   c.sentCount || c.sent || 0,
+          openCount:   c.openCount || c.opens || 0,
+          clickCount:  c.clickCount || c.clicks || 0,
+          replyCount:  c.replyCount || c.replies || 0,
+          unsubscribeCount: c.unsubscribeCount || c.unsubscribes || 0,
+          sentAt:      c.sentAt || c.sentTime || "",
+          createdAt:   c.createdAt || c.dateAdded || "",
+        }));
+      } catch (e) {
+        campaigns = { _error: e.message, _note: "Could not fetch LC Email campaigns — endpoint may not be enabled on this location" };
+      }
+
+      // Try to get aggregate stats
+      try {
+        stats = await ghlTry([
+          `/marketing/emails/stats?locationId=${LOCATION}`,
+          `/marketing/email/stats?locationId=${LOCATION}`,
+          `/emails/stats?locationId=${LOCATION}`,
+        ]);
+      } catch {
+        // Synthesize stats from campaigns if no stats endpoint
+        if (Array.isArray(campaigns)) {
+          const totals = campaigns.reduce((acc, c) => ({
+            sent: acc.sent + (c.sentCount || 0),
+            opens: acc.opens + (c.openCount || 0),
+            clicks: acc.clicks + (c.clickCount || 0),
+            replies: acc.replies + (c.replyCount || 0),
+            unsubscribes: acc.unsubscribes + (c.unsubscribeCount || 0),
+          }), { sent: 0, opens: 0, clicks: 0, replies: 0, unsubscribes: 0 });
+          stats = {
+            _note: "Synthesized from campaigns list (no dedicated stats endpoint).",
+            ...totals,
+            openRate:   totals.sent ? `${(totals.opens / totals.sent * 100).toFixed(2)}%` : "0%",
+            clickRate:  totals.sent ? `${(totals.clicks / totals.sent * 100).toFixed(2)}%` : "0%",
+            replyRate:  totals.sent ? `${(totals.replies / totals.sent * 100).toFixed(2)}%` : "0%",
+            unsubscribeRate: totals.sent ? `${(totals.unsubscribes / totals.sent * 100).toFixed(2)}%` : "0%",
+          };
+        }
+      }
+
+      return { campaigns, stats };
     }
 
     // ── Conversation AI ───────────────────────────────────────────────────────
