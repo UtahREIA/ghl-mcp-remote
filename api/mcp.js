@@ -605,7 +605,7 @@ const TOOLS = [
       required: ["opportunityId", "pipelineStageId"],
     },
   },
-  //
+
   // ── Tier 4: Write tools — Configuration ─────────────────────────────────────
   {
     name: "ghl_create_tag",
@@ -1835,55 +1835,70 @@ async function callTool(name, args) {
     // ── LC Email ──────────────────────────────────────────────────────────────
     case "ghl_get_lc_email": {
       const { limit = 20 } = args;
-      // Aggregate LC Email campaigns + stats. The new emails/campaigns.readonly
-      // and emails/stats.readonly scopes unlock the proper endpoints.
+      // GHL has TWO separate email systems with separate scopes:
+      //   lc-email.readonly        → /lc-email/* endpoints (legacy LC Email)
+      //   emails/campaigns.readonly → /emails/* endpoints (newer Marketing Emails)
+      // Try LC Email paths first since lc-email.readonly is the historical default,
+      // then fall back to /emails/ paths if the user has the newer scope.
       let campaigns = [];
       let stats = null;
+      let errors = [];
 
-      try {
-        const campData = await ghl(`/emails/campaigns?locationId=${LOCATION}&limit=${limit}`);
-        campaigns = (campData.campaigns || campData.data || campData.schedules || []).map(c => ({
-          id:          c.id || c._id,
-          name:        c.name || c.title || "",
-          status:      c.status || c.state || "",
-          subject:     c.subject || "",
-          sentCount:   c.sentCount || c.sent || 0,
-          openCount:   c.openCount || c.opens || 0,
-          clickCount:  c.clickCount || c.clicks || 0,
-          replyCount:  c.replyCount || c.replies || 0,
+      const campaignData = await ghlTry([
+        `/lc-email/campaigns?locationId=${LOCATION}&limit=${limit}`,
+        `/lc-email/?locationId=${LOCATION}&limit=${limit}`,
+        `/emails/campaigns?locationId=${LOCATION}&limit=${limit}`,
+      ]).catch(e => { errors.push(`campaigns: ${e.message}`); return null; });
+
+      if (campaignData) {
+        const list = campaignData.campaigns || campaignData.data || campaignData.schedules || campaignData.emails || [];
+        campaigns = list.map(c => ({
+          id:               c.id || c._id,
+          name:             c.name || c.title || "",
+          status:           c.status || c.state || "",
+          subject:          c.subject || "",
+          hasTracking:      c.hasTracking !== false,
+          sentCount:        c.sentCount || c.sent || 0,
+          openCount:        c.openCount || c.opens || 0,
+          clickCount:       c.clickCount || c.clicks || 0,
+          replyCount:       c.replyCount || c.replies || 0,
           unsubscribeCount: c.unsubscribeCount || c.unsubscribes || 0,
-          sentAt:      c.sentAt || c.sentTime || "",
-          createdAt:   c.createdAt || c.dateAdded || "",
+          bounceCount:      c.bounceCount || c.bounces || 0,
+          sentAt:           c.sentAt || c.sentTime || "",
+          createdAt:        c.createdAt || c.dateAdded || "",
         }));
-      } catch (e) {
-        campaigns = { _error: e.message };
       }
 
-      try {
-        const statsData = await ghl(`/emails/stats?locationId=${LOCATION}`);
+      const statsData = await ghlTry([
+        `/lc-email/stats?locationId=${LOCATION}`,
+        `/emails/stats?locationId=${LOCATION}`,
+      ]).catch(e => { errors.push(`stats: ${e.message}`); return null; });
+
+      if (statsData) {
         stats = statsData.stats || statsData;
-      } catch {
-        // Synthesize from campaigns if no dedicated stats endpoint
-        if (Array.isArray(campaigns) && campaigns.length) {
-          const totals = campaigns.reduce((acc, c) => ({
-            sent: acc.sent + (c.sentCount || 0),
-            opens: acc.opens + (c.openCount || 0),
-            clicks: acc.clicks + (c.clickCount || 0),
-            replies: acc.replies + (c.replyCount || 0),
-            unsubscribes: acc.unsubscribes + (c.unsubscribeCount || 0),
-          }), { sent: 0, opens: 0, clicks: 0, replies: 0, unsubscribes: 0 });
-          stats = {
-            _note: "Synthesized from campaigns list.",
-            ...totals,
-            openRate:        totals.sent ? `${(totals.opens / totals.sent * 100).toFixed(2)}%` : "0%",
-            clickRate:       totals.sent ? `${(totals.clicks / totals.sent * 100).toFixed(2)}%` : "0%",
-            replyRate:       totals.sent ? `${(totals.replies / totals.sent * 100).toFixed(2)}%` : "0%",
-            unsubscribeRate: totals.sent ? `${(totals.unsubscribes / totals.sent * 100).toFixed(2)}%` : "0%",
-          };
-        }
+      } else if (campaigns.length) {
+        const totals = campaigns.reduce((acc, c) => ({
+          sent: acc.sent + (c.sentCount || 0),
+          opens: acc.opens + (c.openCount || 0),
+          clicks: acc.clicks + (c.clickCount || 0),
+          replies: acc.replies + (c.replyCount || 0),
+          unsubscribes: acc.unsubscribes + (c.unsubscribeCount || 0),
+          bounces: acc.bounces + (c.bounceCount || 0),
+        }), { sent: 0, opens: 0, clicks: 0, replies: 0, unsubscribes: 0, bounces: 0 });
+        stats = {
+          _note: "Synthesized from per-campaign data.",
+          ...totals,
+          openRate:        totals.sent ? `${(totals.opens / totals.sent * 100).toFixed(2)}%` : "0%",
+          clickRate:       totals.sent ? `${(totals.clicks / totals.sent * 100).toFixed(2)}%` : "0%",
+          replyRate:       totals.sent ? `${(totals.replies / totals.sent * 100).toFixed(2)}%` : "0%",
+          unsubscribeRate: totals.sent ? `${(totals.unsubscribes / totals.sent * 100).toFixed(2)}%` : "0%",
+          bounceRate:      totals.sent ? `${(totals.bounces / totals.sent * 100).toFixed(2)}%` : "0%",
+        };
       }
 
-      return { campaigns, stats };
+      const result = { campaigns, stats };
+      if (errors.length && !campaigns.length) result._errors = errors;
+      return result;
     }
 
     // ── Conversation AI ───────────────────────────────────────────────────────
@@ -2376,11 +2391,33 @@ async function callTool(name, args) {
 
     case "ghl_get_email_stats": {
       const { startDate, endDate } = args;
-      let url = `/emails/stats?locationId=${LOCATION}`;
-      if (startDate) url += `&startDate=${startDate}`;
-      if (endDate)   url += `&endDate=${endDate}`;
-      const data = await ghl(url);
-      return data.stats || data;
+      // GHL has no aggregate /emails/stats endpoint. Aggregate per-campaign data instead.
+      const start = startDate ? new Date(startDate).getTime() : 0;
+      const end   = endDate   ? new Date(endDate).getTime()   : Date.now();
+      const data = await ghl(`/emails/campaigns?locationId=${LOCATION}&limit=200`);
+      const campaigns = (data.campaigns || data.data || []).filter(c => {
+        const t = new Date(c.sentAt || c.sentTime || c.createdAt || c.dateAdded).getTime();
+        return !isNaN(t) && t >= start && t <= end;
+      });
+      const totals = campaigns.reduce((acc, c) => ({
+        campaigns: acc.campaigns + 1,
+        sent: acc.sent + (c.sentCount || c.sent || 0),
+        opens: acc.opens + (c.openCount || c.opens || 0),
+        clicks: acc.clicks + (c.clickCount || c.clicks || 0),
+        replies: acc.replies + (c.replyCount || c.replies || 0),
+        unsubscribes: acc.unsubscribes + (c.unsubscribeCount || c.unsubscribes || 0),
+        bounces: acc.bounces + (c.bounceCount || c.bounces || 0),
+      }), { campaigns: 0, sent: 0, opens: 0, clicks: 0, replies: 0, unsubscribes: 0, bounces: 0 });
+      return {
+        _note: "Aggregated from per-campaign data — GHL has no native aggregate stats endpoint.",
+        dateRange: { start: startDate || "all-time", end: endDate || "now" },
+        ...totals,
+        openRate:        totals.sent ? `${(totals.opens / totals.sent * 100).toFixed(2)}%` : "0%",
+        clickRate:       totals.sent ? `${(totals.clicks / totals.sent * 100).toFixed(2)}%` : "0%",
+        replyRate:       totals.sent ? `${(totals.replies / totals.sent * 100).toFixed(2)}%` : "0%",
+        unsubscribeRate: totals.sent ? `${(totals.unsubscribes / totals.sent * 100).toFixed(2)}%` : "0%",
+        bounceRate:      totals.sent ? `${(totals.bounces / totals.sent * 100).toFixed(2)}%` : "0%",
+      };
     }
 
     case "ghl_get_brand_board_design_kits": {
