@@ -797,6 +797,88 @@ const TOOLS = [
     },
   },
 
+  // ── Email Campaigns + Stats + Brand Boards (new scopes) ─────────────────────
+  {
+    name: "ghl_get_email_campaigns",
+    description: "List LC Email campaigns (broadcast emails) with per-campaign stats.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit:  { type: "number", description: "Max results (default 20)" },
+        status: { type: "string", description: "Filter by status: draft, scheduled, sent, archived" },
+      },
+    },
+  },
+  {
+    name: "ghl_create_email_campaign",
+    description: "Create a new LC Email campaign (broadcast).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name:        { type: "string", description: "Campaign internal name" },
+        subject:     { type: "string", description: "Email subject line" },
+        html:        { type: "string", description: "Email body HTML" },
+        fromName:    { type: "string" },
+        fromEmail:   { type: "string" },
+        replyTo:     { type: "string" },
+        templateId:  { type: "string", description: "Optional template ID to base campaign on" },
+        scheduleAt:  { type: "string", description: "ISO datetime to send (omit for draft)" },
+      },
+      required: ["name", "subject"],
+    },
+  },
+  {
+    name: "ghl_get_email_stats",
+    description: "Get aggregate LC Email stats (sent, opened, clicked, replied, unsubscribed) for this location.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        startDate: { type: "string", description: "ISO date (default: 30 days ago)" },
+        endDate:   { type: "string", description: "ISO date (default: today)" },
+      },
+    },
+  },
+  {
+    name: "ghl_get_brand_board_design_kits",
+    description: "List brand board design kits (logos, colors, fonts) in GHL for on-brand content generation.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_update_brand_board_design_kit",
+    description: "Update a brand board design kit.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        designKitId: { type: "string" },
+        name:        { type: "string" },
+        colors:      { type: "array", items: { type: "string" } },
+        fonts:       { type: "array", items: { type: "string" } },
+        logoUrl:     { type: "string" },
+      },
+      required: ["designKitId"],
+    },
+  },
+  {
+    name: "ghl_get_brand_board_voices",
+    description: "List brand voice profiles (tone, style guides) configured in GHL Brand Boards.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ghl_update_brand_board_voice",
+    description: "Update a brand voice profile.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        voiceId:     { type: "string" },
+        name:        { type: "string" },
+        description: { type: "string" },
+        tone:        { type: "string", description: "Tone description (e.g. 'professional, friendly')" },
+        guidelines:  { type: "string", description: "Writing guidelines / style rules" },
+      },
+      required: ["voiceId"],
+    },
+  },
+
   // ── Social Planner — Comments, OAuth, CSV, Account Edits ────────────────────
   {
     name: "ghl_get_social_integrations",
@@ -1450,66 +1532,56 @@ async function callTool(name, args) {
       return (data.campaigns || []).map(c => ({ id: c.id, name: c.name, status: c.status || "", type: c.campaignType || "" }));
     }
     case "ghl_get_email_templates": {
-      // GHL's /emails/builder returns top-level items only. Templates can live
-      // inside folders (parentId). Walk the tree to surface all templates.
+      // With the new emails/templates.readonly scope, GHL exposes a proper
+      // /emails/templates endpoint that returns all templates flat (no recursion).
+      // Fall back to recursing /emails/builder if the new path isn't available.
       const allTemplates = [];
-      const seenIds = new Set();
 
-      async function fetchFolder(parentId) {
-        let qs = `locationId=${LOCATION}&limit=100`;
-        if (parentId) qs += `&parentId=${parentId}`;
-        let data;
-        try {
-          data = await ghl(`/emails/builder?${qs}`);
-        } catch {
-          return;
-        }
+      try {
+        const data = await ghl(`/emails/templates?locationId=${LOCATION}&limit=500`);
         const items = data.templates || data.data || data.items || [];
-        for (const item of items) {
-          const id = item.id || item._id;
-          if (!id || seenIds.has(id)) continue;
-          seenIds.add(id);
-          // Folder → recurse into it
-          if (item.type === "folder" || item.isFolder || item.kind === "folder") {
-            await fetchFolder(id);
-          } else {
-            // Template → collect
-            allTemplates.push({
-              id,
-              name:        item.name || item.title || "",
-              subject:     item.subject || "",
-              parentId:    item.parentId || parentId || null,
-              updatedAt:   item.updatedAt || item.dateUpdated || "",
-              createdAt:   item.createdAt || item.dateAdded || "",
-            });
-          }
+        for (const t of items) {
+          allTemplates.push({
+            id:        t.id || t._id,
+            name:      t.name || t.title || "",
+            subject:   t.subject || "",
+            parentId:  t.parentId || null,
+            updatedAt: t.updatedAt || "",
+            createdAt: t.createdAt || "",
+          });
         }
-      }
-
-      await fetchFolder(null);
-
-      // Fallback: if recursion found nothing, try the explicit "show all" variants
-      if (allTemplates.length === 0) {
-        try {
-          const data = await ghlTry([
-            `/emails/builder?locationId=${LOCATION}&limit=100&showAll=true`,
-            `/emails/builder/list?locationId=${LOCATION}&limit=100`,
-            `/marketing/email-templates?locationId=${LOCATION}&limit=100`,
-          ]);
+      } catch {
+        // Fallback: recurse through /emails/builder folders
+        const seenIds = new Set();
+        async function fetchFolder(parentId) {
+          let qs = `locationId=${LOCATION}&limit=100`;
+          if (parentId) qs += `&parentId=${parentId}`;
+          let data;
+          try {
+            data = await ghl(`/emails/builder?${qs}`);
+          } catch {
+            return;
+          }
           const items = data.templates || data.data || data.items || [];
-          for (const t of items) {
-            allTemplates.push({
-              id:        t.id || t._id,
-              name:      t.name || t.title || "",
-              subject:   t.subject || "",
-              parentId:  t.parentId || null,
-              updatedAt: t.updatedAt || "",
-              createdAt: t.createdAt || "",
-            });
+          for (const item of items) {
+            const id = item.id || item._id;
+            if (!id || seenIds.has(id)) continue;
+            seenIds.add(id);
+            if (item.type === "folder" || item.isFolder || item.kind === "folder") {
+              await fetchFolder(id);
+            } else {
+              allTemplates.push({
+                id,
+                name:      item.name || item.title || "",
+                subject:   item.subject || "",
+                parentId:  item.parentId || parentId || null,
+                updatedAt: item.updatedAt || item.dateUpdated || "",
+                createdAt: item.createdAt || item.dateAdded || "",
+              });
+            }
           }
-        } catch {
-          // Endpoints don't exist — return whatever we have
         }
+        await fetchFolder(null);
       }
 
       return { count: allTemplates.length, templates: allTemplates };
@@ -1763,18 +1835,13 @@ async function callTool(name, args) {
     // ── LC Email ──────────────────────────────────────────────────────────────
     case "ghl_get_lc_email": {
       const { limit = 20 } = args;
-      // Fetch LC Email campaigns + aggregate stats. The original /email-isv/verify
-      // was the wrong endpoint (that's email address validation, not campaign data).
+      // Aggregate LC Email campaigns + stats. The new emails/campaigns.readonly
+      // and emails/stats.readonly scopes unlock the proper endpoints.
       let campaigns = [];
       let stats = null;
 
-      // Try multiple campaign endpoints
       try {
-        const campData = await ghlTry([
-          `/marketing/emails/campaigns?locationId=${LOCATION}&limit=${limit}`,
-          `/marketing/email/campaigns?locationId=${LOCATION}&limit=${limit}`,
-          `/emails/campaigns?locationId=${LOCATION}&limit=${limit}`,
-        ]);
+        const campData = await ghl(`/emails/campaigns?locationId=${LOCATION}&limit=${limit}`);
         campaigns = (campData.campaigns || campData.data || campData.schedules || []).map(c => ({
           id:          c.id || c._id,
           name:        c.name || c.title || "",
@@ -1789,19 +1856,15 @@ async function callTool(name, args) {
           createdAt:   c.createdAt || c.dateAdded || "",
         }));
       } catch (e) {
-        campaigns = { _error: e.message, _note: "Could not fetch LC Email campaigns — endpoint may not be enabled on this location" };
+        campaigns = { _error: e.message };
       }
 
-      // Try to get aggregate stats
       try {
-        stats = await ghlTry([
-          `/marketing/emails/stats?locationId=${LOCATION}`,
-          `/marketing/email/stats?locationId=${LOCATION}`,
-          `/emails/stats?locationId=${LOCATION}`,
-        ]);
+        const statsData = await ghl(`/emails/stats?locationId=${LOCATION}`);
+        stats = statsData.stats || statsData;
       } catch {
-        // Synthesize stats from campaigns if no stats endpoint
-        if (Array.isArray(campaigns)) {
+        // Synthesize from campaigns if no dedicated stats endpoint
+        if (Array.isArray(campaigns) && campaigns.length) {
           const totals = campaigns.reduce((acc, c) => ({
             sent: acc.sent + (c.sentCount || 0),
             opens: acc.opens + (c.openCount || 0),
@@ -1810,11 +1873,11 @@ async function callTool(name, args) {
             unsubscribes: acc.unsubscribes + (c.unsubscribeCount || 0),
           }), { sent: 0, opens: 0, clicks: 0, replies: 0, unsubscribes: 0 });
           stats = {
-            _note: "Synthesized from campaigns list (no dedicated stats endpoint).",
+            _note: "Synthesized from campaigns list.",
             ...totals,
-            openRate:   totals.sent ? `${(totals.opens / totals.sent * 100).toFixed(2)}%` : "0%",
-            clickRate:  totals.sent ? `${(totals.clicks / totals.sent * 100).toFixed(2)}%` : "0%",
-            replyRate:  totals.sent ? `${(totals.replies / totals.sent * 100).toFixed(2)}%` : "0%",
+            openRate:        totals.sent ? `${(totals.opens / totals.sent * 100).toFixed(2)}%` : "0%",
+            clickRate:       totals.sent ? `${(totals.clicks / totals.sent * 100).toFixed(2)}%` : "0%",
+            replyRate:       totals.sent ? `${(totals.replies / totals.sent * 100).toFixed(2)}%` : "0%",
             unsubscribeRate: totals.sent ? `${(totals.unsubscribes / totals.sent * 100).toFixed(2)}%` : "0%",
           };
         }
@@ -2271,6 +2334,101 @@ async function callTool(name, args) {
       if (categoryId)      body.categoryId      = categoryId;
       const data = await ghlPost("/knowledge-base/", body);
       return data.article || data;
+    }
+
+    // ── Email Campaigns + Stats + Brand Boards ────────────────────────────────
+    case "ghl_get_email_campaigns": {
+      const { limit = 20, status } = args;
+      let url = `/emails/campaigns?locationId=${LOCATION}&limit=${limit}`;
+      if (status) url += `&status=${status}`;
+      const data = await ghl(url);
+      return (data.campaigns || data.data || []).map(c => ({
+        id:               c.id || c._id,
+        name:             c.name || c.title || "",
+        status:           c.status || c.state || "",
+        subject:          c.subject || "",
+        sentCount:        c.sentCount || c.sent || 0,
+        openCount:        c.openCount || c.opens || 0,
+        clickCount:       c.clickCount || c.clicks || 0,
+        replyCount:       c.replyCount || c.replies || 0,
+        unsubscribeCount: c.unsubscribeCount || c.unsubscribes || 0,
+        sentAt:           c.sentAt || c.sentTime || "",
+        createdAt:        c.createdAt || c.dateAdded || "",
+      }));
+    }
+
+    case "ghl_create_email_campaign": {
+      const { name: cName, subject, html, fromName, fromEmail, replyTo, templateId, scheduleAt } = args;
+      const body = {
+        locationId: LOCATION,
+        name: cName,
+        subject,
+      };
+      if (html)       body.html       = html;
+      if (fromName)   body.fromName   = fromName;
+      if (fromEmail)  body.fromEmail  = fromEmail;
+      if (replyTo)    body.replyTo    = replyTo;
+      if (templateId) body.templateId = templateId;
+      if (scheduleAt) body.scheduleAt = scheduleAt;
+      const data = await ghlPost(`/emails/campaigns`, body);
+      return data.campaign || data;
+    }
+
+    case "ghl_get_email_stats": {
+      const { startDate, endDate } = args;
+      let url = `/emails/stats?locationId=${LOCATION}`;
+      if (startDate) url += `&startDate=${startDate}`;
+      if (endDate)   url += `&endDate=${endDate}`;
+      const data = await ghl(url);
+      return data.stats || data;
+    }
+
+    case "ghl_get_brand_board_design_kits": {
+      const data = await ghlTry([
+        `/brand-boards/design-kits?locationId=${LOCATION}`,
+        `/brand-boards/${LOCATION}/design-kits`,
+      ]);
+      return (data.designKits || data.kits || data.data || []).map(k => ({
+        id:      k.id || k._id,
+        name:    k.name || "",
+        colors:  k.colors || [],
+        fonts:   k.fonts || [],
+        logoUrl: k.logoUrl || k.logo || "",
+      }));
+    }
+
+    case "ghl_update_brand_board_design_kit": {
+      const { designKitId, ...fields } = args;
+      const body = { locationId: LOCATION };
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/brand-boards/design-kits/${designKitId}`, body);
+      return data.designKit || data;
+    }
+
+    case "ghl_get_brand_board_voices": {
+      const data = await ghlTry([
+        `/brand-boards/voices?locationId=${LOCATION}`,
+        `/brand-boards/${LOCATION}/voices`,
+      ]);
+      return (data.voices || data.data || []).map(v => ({
+        id:          v.id || v._id,
+        name:        v.name || "",
+        description: v.description || "",
+        tone:        v.tone || "",
+        guidelines:  v.guidelines || "",
+      }));
+    }
+
+    case "ghl_update_brand_board_voice": {
+      const { voiceId, ...fields } = args;
+      const body = { locationId: LOCATION };
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      const data = await ghlPut(`/brand-boards/voices/${voiceId}`, body);
+      return data.voice || data;
     }
 
     // ── Social Planner Extra ──────────────────────────────────────────────────
