@@ -1596,33 +1596,28 @@ async function callTool(name, args) {
     }
     case "ghl_get_social_posts": {
       const { limit = 20 } = args;
-      // GHL uses POST + body for listing social posts (similar to /contacts/search pattern)
-      let data;
-      try {
-        data = await ghlPost(`/social-media-posting/${LOCATION}/posts/list`, {
-          type: "post",
-          limit,
-          skip: 0,
-        });
-      } catch (e1) {
-        try {
-          // Alternative: filter object with various fields GHL expects
-          data = await ghlPost(`/social-media-posting/${LOCATION}/posts/list`, {
-            limit,
-            skip: 0,
-            includeUsers: true,
-          });
-        } catch (e2) {
-          throw new Error(`Social posts list failed. Attempts:\n1. ${e1.message}\n2. ${e2.message}`);
-        }
-      }
-      return (data.posts || data.data || data.results || []).map(p => ({
-        id: p.id || p._id,
-        content: p.summary || p.content || p.text || "",
-        platform: p.platform || "",
-        accountIds: p.accountIds || p.accounts || [],
+      // GHL's POST /posts/list requires skip/limit as STRINGS (not numbers) and
+      // includeUsers as a string boolean. Yes, really.
+      const data = await ghlPost(`/social-media-posting/${LOCATION}/posts/list`, {
+        type: "post",
+        limit: String(limit),
+        skip: "0",
+        includeUsers: "true",
+      });
+      // Response shape: { success, results: { posts: [...] } } or similar
+      const posts = data.posts
+        || data.data
+        || data.results?.posts
+        || (Array.isArray(data.results) ? data.results : [])
+        || [];
+      return posts.map(p => ({
+        id:          p.id || p._id,
+        content:     p.summary || p.content || p.text || "",
+        platform:    p.platform || "",
+        accountIds:  p.accountIds || p.accounts || [],
+        mediaUrls:   p.mediaUrls || p.attachments || [],
         scheduledAt: p.scheduledAt || p.publishAt || "",
-        status: p.status || p.state || "",
+        status:      p.status || p.state || "",
       }));
     }
     case "ghl_get_workflows": {
@@ -1732,30 +1727,33 @@ async function callTool(name, args) {
         `/social-media-posting/${LOCATION}/accounts`,
         `/social-media-posting/accounts?locationId=${LOCATION}`,
       ]);
-      // GHL's social accounts response often groups by platform — flatten everything
-      // into a single array regardless of response shape.
+      // GHL wraps responses as { success, statusCode, message, results: { accounts: [...] } }
+      // Handle every shape we've seen in the wild.
       let accounts = [];
-      if (Array.isArray(data)) {
-        accounts = data;
-      } else if (Array.isArray(data.accounts)) {
-        accounts = data.accounts;
-      } else if (Array.isArray(data.results)) {
-        accounts = data.results;
-      } else if (data.accounts && typeof data.accounts === "object") {
-        // Shape: { accounts: { facebook: [...], instagram: [...], linkedin: [...] } }
+      if (Array.isArray(data))                              accounts = data;
+      else if (Array.isArray(data.accounts))                accounts = data.accounts;
+      else if (Array.isArray(data.results))                 accounts = data.results;
+      else if (Array.isArray(data.results?.accounts))       accounts = data.results.accounts;
+      else if (Array.isArray(data.data?.accounts))          accounts = data.data.accounts;
+      else if (data.accounts && typeof data.accounts === "object") {
         accounts = Object.entries(data.accounts).flatMap(([platform, list]) =>
           (Array.isArray(list) ? list : []).map(a => ({ ...a, platform: a.platform || platform }))
         );
       } else {
-        // Unknown shape — return raw so caller can inspect
-        return { _rawResponse: data, _note: "Response shape not recognized — inspect _rawResponse to identify account format" };
+        return { _rawResponse: data, _note: "Response shape not recognized" };
       }
       return accounts.map(a => ({
-        id: a.id || a._id,
-        name: a.name || a.displayName || a.pageName || "",
-        platform: a.platform || a.type || "",
-        username: a.username || a.handle || a.pageId || "",
-        active: a.active !== false,
+        id:         a.id || a._id,
+        oauthId:    a.oauthId || "",
+        profileId:  a.profileId || "",
+        name:       a.name || a.displayName || a.pageName || "",
+        platform:   a.platform || a.type || "",
+        type:       a.type || "",
+        avatar:     a.avatar || "",
+        username:   a.username || a.handle || a.pageId || "",
+        expiresAt:  a.expire || a.expiresAt || "",
+        isExpired:  a.isExpired || false,
+        active:     a.active !== false,
       }));
     }
     case "ghl_get_social_categories": {
@@ -2150,17 +2148,34 @@ async function callTool(name, args) {
     // ── Tier 3 Write: Social ──────────────────────────────────────────────────
     case "ghl_create_social_post": {
       const { accountIds, summary, scheduleDate, mediaUrls, categoryId, tags } = args;
+      if (!Array.isArray(accountIds) || accountIds.length === 0) {
+        throw new Error("accountIds is required and must be a non-empty array. Get IDs via ghl_get_social_accounts.");
+      }
+      if (!summary) throw new Error("summary (post content) is required");
+
       const body = {
         accountIds,
         summary,
         type: scheduleDate ? "scheduled" : "now",
       };
       if (scheduleDate) body.scheduleDate = scheduleDate;
-      if (mediaUrls)    body.mediaUrls    = mediaUrls;
+      // GHL accepts media as attachments — support both param names
+      if (mediaUrls && mediaUrls.length) body.attachments = mediaUrls;
       if (categoryId)   body.categoryId   = categoryId;
       if (tags)         body.tags         = tags;
+
       const data = await ghlPost(`/social-media-posting/${LOCATION}/posts`, body);
-      return data.post || data;
+      // GHL wraps responses: { success, statusCode, results: { post: {...} } }
+      const post = data.post
+        || data.results?.post
+        || data.results
+        || data.data
+        || data;
+      return {
+        success: data.success !== false,
+        post,
+        _rawIfDebugging: data.success === undefined ? undefined : undefined,
+      };
     }
 
     // ── Tier 3 Write: Documents ───────────────────────────────────────────────
