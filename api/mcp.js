@@ -1596,29 +1596,59 @@ async function callTool(name, args) {
     }
     case "ghl_get_social_posts": {
       const { limit = 20 } = args;
-      // GHL's POST /posts/list requires skip/limit as STRINGS (not numbers) and
-      // includeUsers as a string boolean. Yes, really.
+      // GHL's POST /posts/list requires skip/limit as STRINGS.
       const data = await ghlPost(`/social-media-posting/${LOCATION}/posts/list`, {
         type: "post",
         limit: String(limit),
         skip: "0",
         includeUsers: "true",
       });
-      // Response shape: { success, results: { posts: [...] } } or similar
       const posts = data.posts
         || data.data
         || data.results?.posts
         || (Array.isArray(data.results) ? data.results : [])
         || [];
-      return posts.map(p => ({
-        id:          p.id || p._id,
-        content:     p.summary || p.content || p.text || "",
-        platform:    p.platform || "",
-        accountIds:  p.accountIds || p.accounts || [],
-        mediaUrls:   p.mediaUrls || p.attachments || [],
-        scheduledAt: p.scheduledAt || p.publishAt || "",
-        status:      p.status || p.state || "",
-      }));
+
+      // Fetch account list once to resolve per-account platforms.
+      // (accountIds field on a post lists WHICH accounts got the post,
+      //  and each account carries its own platform — the post itself
+      //  doesn't always have a single platform.)
+      let accountPlatformMap = {};
+      try {
+        const accData = await ghl(`/social-media-posting/${LOCATION}/accounts`);
+        const accounts = accData.results?.accounts || accData.accounts || [];
+        for (const a of accounts) {
+          if (a.id) accountPlatformMap[a.id] = a.platform || a.type || "";
+        }
+      } catch { /* non-fatal */ }
+
+      return posts.map(p => {
+        const accountIds = p.accountIds || p.accounts || [];
+        // Derive platforms from linked accounts (multi-platform posts are common)
+        const derivedPlatforms = [...new Set(accountIds.map(id => accountPlatformMap[id]).filter(Boolean))];
+        return {
+          id:          p.id || p._id,
+          content:     p.summary || p.content || p.text || "",
+          // Platform: try the field first, else derive from account IDs
+          platform:    derivedPlatforms.join(", ") || p.platform || p.platformType || p.channelType || "",
+          platforms:   derivedPlatforms,   // always an array for automation code
+          accountIds,
+          mediaUrls:   p.mediaUrls || p.attachments || p.media || [],
+          // scheduledAt: GHL uses several field names depending on post state
+          scheduledAt: p.scheduledAt
+                    || p.scheduledTime
+                    || p.publishAt
+                    || p.publishTime
+                    || p.postDate
+                    || p.sendDate
+                    || p.startDate
+                    || p.dateTime
+                    || "",
+          status:      p.status || p.state || "",
+          createdAt:   p.createdAt || p.dateAdded || "",
+          updatedAt:   p.updatedAt || p.dateUpdated || "",
+        };
+      });
     }
     case "ghl_get_workflows": {
       const data = await ghl(`/workflows/?locationId=${LOCATION}`);
