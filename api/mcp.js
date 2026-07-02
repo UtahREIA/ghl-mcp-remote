@@ -529,18 +529,32 @@ const TOOLS = [
   },
   {
     name: "ghl_create_social_post",
-    description: "Schedule a social media post via GHL Social Planner.",
+    description: "Schedule a social media post, story, or reel via GHL Social Planner. Supports Facebook, Instagram, TikTok, LinkedIn, YouTube, and GHL Community.",
     inputSchema: {
       type: "object",
       properties: {
-        accountIds:  { type: "array", items: { type: "string" }, description: "Social account IDs to post from (get via ghl_get_social_accounts)" },
-        summary:     { type: "string", description: "Post content" },
-        scheduleDate:{ type: "string", description: "ISO datetime for scheduled posts (omit to post now)" },
-        mediaUrls:   { type: "array", items: { type: "string" }, description: "Image/video URLs to attach" },
+        accountIds:  { type: "array", items: { type: "string" }, description: "Social account IDs to post to (get via ghl_get_social_accounts)" },
+        summary:     { type: "string", description: "Post caption / content text" },
+        userId:      { type: "string", description: "GHL user ID for whom this post is being scheduled (get via ghl_get_users). Required by GHL for scheduling." },
+        postType:    { type: "string", enum: ["post", "story", "reel"], description: "Content type. 'reel' for short-form video (IG/FB), 'story' for 24h stories, 'post' for standard feed posts. Default: post" },
+        scheduleDate:{ type: "string", description: "ISO datetime for scheduled posts (omit to post immediately)" },
+        media:       {
+          type: "array",
+          description: "Media attachments as structured objects. Preferred format for images/videos.",
+          items: {
+            type: "object",
+            properties: {
+              url:  { type: "string", description: "Public URL to image or video file" },
+              type: { type: "string", description: "MIME type or category: 'image', 'video', or 'image/jpeg', 'video/mp4' etc." },
+            },
+            required: ["url"],
+          },
+        },
+        mediaUrls:   { type: "array", items: { type: "string" }, description: "Legacy — plain URL strings. Auto-converted to structured 'media' format. Use 'media' for new code." },
         categoryId:  { type: "string" },
         tags:        { type: "array", items: { type: "string" } },
       },
-      required: ["accountIds", "summary"],
+      required: ["accountIds", "summary", "userId"],
     },
   },
   {
@@ -2177,25 +2191,47 @@ async function callTool(name, args) {
 
     // ── Tier 3 Write: Social ──────────────────────────────────────────────────
     case "ghl_create_social_post": {
-      const { accountIds, summary, scheduleDate, mediaUrls, categoryId, tags } = args;
+      const { accountIds, summary, userId, postType = "post", scheduleDate, media, mediaUrls, categoryId, tags } = args;
+
       if (!Array.isArray(accountIds) || accountIds.length === 0) {
         throw new Error("accountIds is required and must be a non-empty array. Get IDs via ghl_get_social_accounts.");
       }
       if (!summary) throw new Error("summary (post content) is required");
+      if (!userId) {
+        throw new Error("userId is required by GHL. Get available user IDs via ghl_get_users.");
+      }
+      if (!["post", "story", "reel"].includes(postType)) {
+        throw new Error("postType must be one of: post, story, reel");
+      }
+
+      // Normalize media: prefer structured `media`, fall back to converting `mediaUrls` strings.
+      // GHL expects: [{ url: string, type: string }]
+      let mediaArray = [];
+      if (Array.isArray(media) && media.length) {
+        mediaArray = media.map(m => ({
+          url:  m.url,
+          type: m.type || (/\.(mp4|mov|webm|m4v)(\?|$)/i.test(m.url) ? "video" : "image"),
+        }));
+      } else if (Array.isArray(mediaUrls) && mediaUrls.length) {
+        mediaArray = mediaUrls.map(url => ({
+          url,
+          type: /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url) ? "video" : "image",
+        }));
+      }
 
       const body = {
         accountIds,
         summary,
+        userId,
+        postType,
         type: scheduleDate ? "scheduled" : "now",
       };
       if (scheduleDate) body.scheduleDate = scheduleDate;
-      // GHL accepts media as attachments — support both param names
-      if (mediaUrls && mediaUrls.length) body.attachments = mediaUrls;
-      if (categoryId)   body.categoryId   = categoryId;
-      if (tags)         body.tags         = tags;
+      if (mediaArray.length) body.media = mediaArray;
+      if (categoryId) body.categoryId = categoryId;
+      if (tags)       body.tags       = tags;
 
       const data = await ghlPost(`/social-media-posting/${LOCATION}/posts`, body);
-      // GHL wraps responses: { success, statusCode, results: { post: {...} } }
       const post = data.post
         || data.results?.post
         || data.results
@@ -2204,7 +2240,6 @@ async function callTool(name, args) {
       return {
         success: data.success !== false,
         post,
-        _rawIfDebugging: data.success === undefined ? undefined : undefined,
       };
     }
 
