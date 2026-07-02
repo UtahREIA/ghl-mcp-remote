@@ -2931,7 +2931,20 @@ async function callTool(name, args) {
 
     // ── Users & Businesses ────────────────────────────────────────────────────
     case "ghl_get_users": {
-      const data = await ghl(`/users/search?companyId=&locationId=${LOCATION}`);
+      // GHL's /users/search requires companyId (agency ID). Derive it from the
+      // location details first, then include in the search request.
+      let companyId = process.env.GHL_COMPANY_ID || "";
+      if (!companyId) {
+        try {
+          const loc = await ghl(`/locations/${LOCATION}`);
+          const l = loc.location || loc;
+          companyId = l.companyId || l.agencyId || l.company?.id || "";
+        } catch { /* fall through */ }
+      }
+      if (!companyId) {
+        throw new Error("Could not determine companyId. Set GHL_COMPANY_ID env var or ensure the location record includes it.");
+      }
+      const data = await ghl(`/users/search?companyId=${companyId}&locationId=${LOCATION}`);
       return (data.users || []).map(u => ({
         id: u.id,
         name: `${u.firstName || ""} ${u.lastName || ""}`.trim(),
