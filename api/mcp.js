@@ -2267,20 +2267,19 @@ async function callTool(name, args) {
       }
 
       // Upload any external URLs to GHL first, then build the media array.
-      // GHL's post endpoint expects a specific shape that has been elusive.
-      // Based on repeated "Invalid media format type" errors, GHL likely wants
-      // the fileId reference and URL — NOT a `type` field. GHL infers type
-      // from the uploaded file itself.
       const mediaArray = [];
       const uploadedRaw = [];  // for debugging
+      const uploadedContentTypes = [];
       for (const m of inputMedia) {
         let fileObj;
+        let detectedContentType = m.type || "";
         if (isGhlHosted(m.url)) {
           fileObj = { url: m.url, id: "" };
         } else {
           try {
             const uploaded = await uploadToGhl(m.url);
             uploadedRaw.push(uploaded);
+            detectedContentType = uploaded._contentType || detectedContentType;
             fileObj = {
               id: uploaded.fileId || uploaded.id || uploaded._id || uploaded.data?.id || "",
               url: uploaded.url || uploaded.fileUrl || uploaded.hostedUrl || uploaded.data?.url || m.url,
@@ -2290,13 +2289,21 @@ async function callTool(name, args) {
             throw new Error(`Failed to upload media to GHL library: ${e.message}. Ensure the URL is publicly accessible.`);
           }
         }
-        // GHL's expected shape (from testing): url + id (fileId reference).
-        // No `type` field — GHL infers image vs video from the uploaded file.
+        uploadedContentTypes.push(detectedContentType);
         const mediaObj = { url: fileObj.url };
         if (fileObj.id) mediaObj.id = fileObj.id;
         if (fileObj.thumbnailUrl) mediaObj.thumbnailUrl = fileObj.thumbnailUrl;
         mediaArray.push(mediaObj);
       }
+
+      // Discover which `type` value GHL accepts by attempting candidates in order.
+      // We probe on retry so we can lock in the right one going forward.
+      const isVideo = (uploadedContentTypes[0] || "").startsWith("video/");
+      const typeCandidates = isVideo
+        ? ["video", "VIDEO", "video/mp4", uploadedContentTypes[0] || "video/mp4"]
+        : ["image", "IMAGE", "image/jpeg", uploadedContentTypes[0] || "image/jpeg", "jpg", "jpeg", "photo"];
+      // De-duplicate while preserving order
+      const uniqueCandidates = [...new Set(typeCandidates.filter(Boolean))];
 
       // Build request body. GHL field mapping (from live API errors):
       //   type   → post type: "post" | "story" | "reel"
@@ -2318,18 +2325,48 @@ async function callTool(name, args) {
       if (categoryId) body.categoryId = categoryId;
       if (tags)       body.tags       = tags;
 
+      // If we have media, probe candidate `type` values until one succeeds
+      // (or all fail — then throw with full context).
       let data;
-      try {
-        data = await ghlPost(`/social-media-posting/${LOCATION}/posts`, body);
-      } catch (e) {
-        // Attach debug info to error so we can see exactly what got sent
-        const debugMsg = [
-          `GHL post rejected: ${e.message}`,
-          `_sentBody: ${JSON.stringify(body)}`,
-          `_uploadedRaw: ${JSON.stringify(uploadedRaw)}`,
-        ].join(" | ");
-        throw new Error(debugMsg);
+      let typeAttempts = [];
+      let workingType = null;
+
+      if (mediaArray.length === 0) {
+        try {
+          data = await ghlPost(`/social-media-posting/${LOCATION}/posts`, body);
+        } catch (e) {
+          throw new Error(`GHL post rejected (text-only): ${e.message} | _sentBody: ${JSON.stringify(body)}`);
+        }
+      } else {
+        for (const candidateType of uniqueCandidates) {
+          const attemptBody = { ...body, media: mediaArray.map(m => ({ ...m, type: candidateType })) };
+          try {
+            data = await ghlPost(`/social-media-posting/${LOCATION}/posts`, attemptBody);
+            workingType = candidateType;
+            break;
+          } catch (e) {
+            typeAttempts.push({ type: candidateType, error: e.message });
+            // Only continue probing if this is a "type" validation error
+            if (!/type|format|invalid/i.test(e.message)) {
+              throw new Error([
+                `GHL post rejected (non-type error): ${e.message}`,
+                `_sentBody: ${JSON.stringify(attemptBody)}`,
+                `_uploadedRaw: ${JSON.stringify(uploadedRaw)}`,
+                `_typeAttempts: ${JSON.stringify(typeAttempts)}`,
+              ].join(" | "));
+            }
+          }
+        }
+        if (!data) {
+          throw new Error([
+            `GHL rejected all media type candidates.`,
+            `_typeAttempts: ${JSON.stringify(typeAttempts)}`,
+            `_uploadedRaw: ${JSON.stringify(uploadedRaw)}`,
+            `Tried these type values in order: ${uniqueCandidates.join(", ")}`,
+          ].join(" | "));
+        }
       }
+
       const post = data.post
         || data.results?.post
         || data.results
@@ -2340,6 +2377,8 @@ async function callTool(name, args) {
         post,
         _sentMedia: mediaArray,
         _uploadedRaw: uploadedRaw,
+        _workingType: workingType,
+        _typeAttempts: typeAttempts.length ? typeAttempts : undefined,
       };
     }
 
