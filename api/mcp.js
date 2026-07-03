@@ -2202,23 +2202,53 @@ async function callTool(name, args) {
         throw new Error("postType must be one of: post, story, reel");
       }
 
-      // Helper: upload an external URL to GHL's media library and return the
-      // resulting media file object (which contains the fields GHL needs on the
-      // post: url, id, fileType, etc.). GHL's social planner rejects raw external
-      // URLs — media has to be GHL-hosted first.
+      // Helper: upload an external URL to GHL's media library.
+      // Strategy: fetch the file bytes ourselves first (so we control the
+      // content-type detection), then upload as a proper multipart file to GHL.
+      // Using GHL's "hosted URL" mode fails on Unsplash/signed URLs because
+      // GHL can't reliably detect content-type from those responses.
       async function uploadToGhl(externalUrl) {
+        // 1. Fetch the file
+        const fileRes = await fetch(externalUrl, { redirect: "follow" });
+        if (!fileRes.ok) throw new Error(`Could not fetch ${externalUrl}: HTTP ${fileRes.status}`);
+
+        // 2. Determine content type and filename
+        let contentType = fileRes.headers.get("content-type") || "";
+        // Strip any charset suffix (e.g. "image/jpeg; charset=utf-8" → "image/jpeg")
+        contentType = contentType.split(";")[0].trim();
+        // Infer from extension if server didn't provide a usable type
+        if (!contentType || contentType === "application/octet-stream" || contentType === "binary/octet-stream") {
+          const ext = externalUrl.split("?")[0].split(".").pop().toLowerCase();
+          const extMap = {
+            jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif",
+            webp: "image/webp", svg: "image/svg+xml",
+            mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
+            m4v: "video/x-m4v", avi: "video/x-msvideo",
+          };
+          contentType = extMap[ext] || "application/octet-stream";
+        }
+        const extFromMime = { "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif",
+                              "image/webp": "webp", "video/mp4": "mp4", "video/quicktime": "mov",
+                              "video/webm": "webm" }[contentType] || "bin";
+        let filename = (externalUrl.split("/").pop() || "media").split("?")[0];
+        if (!filename.includes(".")) filename = `${filename || "media"}.${extFromMime}`;
+
+        // 3. Get bytes and wrap as Blob with explicit content-type
+        const buffer = await fileRes.arrayBuffer();
+        const blob = new Blob([buffer], { type: contentType });
+
+        // 4. Upload to GHL as a proper multipart file
         const form = new FormData();
-        form.append("hosted", "true");
-        form.append("fileUrl", externalUrl);
-        form.append("name", externalUrl.split("/").pop().split("?")[0] || "media");
+        form.append("file", blob, filename);
+        form.append("name", filename);
         const res = await fetch(`https://services.leadconnectorhq.com/medias/upload-file?locationId=${LOCATION}`, {
           method: "POST",
           headers: { Authorization: `Bearer ${TOKEN}`, Version: "2021-07-28" },
           body: form,
         });
         const uploaded = await res.json();
-        if (!res.ok) throw new Error(`Media upload failed for ${externalUrl}: ${uploaded?.message || res.status}`);
-        return uploaded;
+        if (!res.ok) throw new Error(`GHL upload failed (${res.status}) for ${filename}: ${uploaded?.message || JSON.stringify(uploaded)}`);
+        return { ...uploaded, _contentType: contentType, _filename: filename };
       }
 
       // GHL-hosted URLs live under storage.googleapis.com/highlevel-backend or msgsndr.com
