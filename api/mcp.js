@@ -2202,30 +2202,77 @@ async function callTool(name, args) {
         throw new Error("postType must be one of: post, story, reel");
       }
 
-      // Normalize media into GHL's expected shape: [{ url, type }] where type is
-      // "image" or "video" (based on file extension if not explicitly provided).
-      let mediaArray = [];
-      const inferMediaType = url =>
-        /\.(mp4|mov|webm|m4v|avi|mkv)(\?|$)/i.test(url) ? "video" : "image";
-      if (Array.isArray(media) && media.length) {
-        mediaArray = media.map(m => ({
-          url:  m.url,
-          type: m.type === "video" || m.type === "image" ? m.type : inferMediaType(m.url),
-        }));
-      } else if (Array.isArray(mediaUrls) && mediaUrls.length) {
-        mediaArray = mediaUrls.map(url => ({ url, type: inferMediaType(url) }));
+      // Helper: upload an external URL to GHL's media library and return the
+      // resulting media file object (which contains the fields GHL needs on the
+      // post: url, id, fileType, etc.). GHL's social planner rejects raw external
+      // URLs — media has to be GHL-hosted first.
+      async function uploadToGhl(externalUrl) {
+        const form = new FormData();
+        form.append("hosted", "true");
+        form.append("fileUrl", externalUrl);
+        form.append("name", externalUrl.split("/").pop().split("?")[0] || "media");
+        const res = await fetch(`https://services.leadconnectorhq.com/medias/upload-file?locationId=${LOCATION}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${TOKEN}`, Version: "2021-07-28" },
+          body: form,
+        });
+        const uploaded = await res.json();
+        if (!res.ok) throw new Error(`Media upload failed for ${externalUrl}: ${uploaded?.message || res.status}`);
+        return uploaded;
       }
 
-      // GHL's field naming (verified from live API error messages):
-      //   type        → the post type: "post" | "story" | "reel"
-      //   status      → "scheduled" or "draft" (inferred from scheduleDate presence)
-      // Our previous code was sending `type: "scheduled"|"now"` (wrong) AND
-      // `postType: "post"|"story"|"reel"` (wrong field name) — collision.
+      // GHL-hosted URLs live under storage.googleapis.com/highlevel-backend or msgsndr.com
+      const isGhlHosted = url =>
+        /highlevel|leadconnector|msgsndr|storage\.googleapis\.com\/highlevel/i.test(url || "");
+
+      const inferMediaType = url =>
+        /\.(mp4|mov|webm|m4v|avi|mkv)(\?|$)/i.test(url) ? "video" : "image";
+
+      // Collect input URLs from either `media` or `mediaUrls`
+      const inputMedia = [];
+      if (Array.isArray(media) && media.length) {
+        for (const m of media) inputMedia.push({ url: m.url, type: m.type });
+      } else if (Array.isArray(mediaUrls) && mediaUrls.length) {
+        for (const url of mediaUrls) inputMedia.push({ url, type: inferMediaType(url) });
+      }
+
+      // Upload any external URLs to GHL first, then build the media array in
+      // GHL's expected shape: { id, url, type, thumbnailUrl? }
+      const mediaArray = [];
+      for (const m of inputMedia) {
+        let fileObj;
+        if (isGhlHosted(m.url)) {
+          // Already hosted — pass through as-is
+          fileObj = { url: m.url, id: "" };
+        } else {
+          try {
+            const uploaded = await uploadToGhl(m.url);
+            // GHL returns different shapes — pull the hosted URL and file ID
+            fileObj = {
+              id: uploaded.fileId || uploaded.id || uploaded._id || uploaded.data?.id || "",
+              url: uploaded.url || uploaded.fileUrl || uploaded.hostedUrl || uploaded.data?.url || m.url,
+            };
+          } catch (e) {
+            throw new Error(`Failed to upload media to GHL library: ${e.message}. Ensure the URL is publicly accessible.`);
+          }
+        }
+        mediaArray.push({
+          id:   fileObj.id,
+          url:  fileObj.url,
+          type: (m.type === "video" || m.type === "image") ? m.type : inferMediaType(m.url),
+        });
+      }
+
+      // Build request body. GHL field mapping (from live API errors):
+      //   type   → post type: "post" | "story" | "reel"
+      //   status → "scheduled" or "draft"
+      //   media  → array of { id, url, type } (empty array is valid for text-only)
       const body = {
         accountIds,
         summary,
         userId,
         type: postType,
+        media: mediaArray,  // always send, even if empty (GHL requires the field)
       };
       if (scheduleDate) {
         body.scheduleDate = scheduleDate;
@@ -2233,9 +2280,8 @@ async function callTool(name, args) {
       } else {
         body.status = "draft";
       }
-      if (mediaArray.length) body.media = mediaArray;
-      if (categoryId)        body.categoryId = categoryId;
-      if (tags)              body.tags       = tags;
+      if (categoryId) body.categoryId = categoryId;
+      if (tags)       body.tags       = tags;
 
       const data = await ghlPost(`/social-media-posting/${LOCATION}/posts`, body);
       const post = data.post
@@ -2246,6 +2292,7 @@ async function callTool(name, args) {
       return {
         success: data.success !== false,
         post,
+        _uploadedMedia: mediaArray,
       };
     }
 
