@@ -2197,39 +2197,45 @@ async function callTool(name, args) {
         throw new Error("accountIds is required and must be a non-empty array. Get IDs via ghl_get_social_accounts.");
       }
       if (!summary) throw new Error("summary (post content) is required");
-      if (!userId) {
-        throw new Error("userId is required by GHL. Get available user IDs via ghl_get_users.");
-      }
+      if (!userId)  throw new Error("userId is required by GHL. Get user IDs via ghl_get_users.");
       if (!["post", "story", "reel"].includes(postType)) {
         throw new Error("postType must be one of: post, story, reel");
       }
 
-      // Normalize media: prefer structured `media`, fall back to converting `mediaUrls` strings.
-      // GHL expects: [{ url: string, type: string }]
+      // Normalize media into GHL's expected shape: [{ url, type }] where type is
+      // "image" or "video" (based on file extension if not explicitly provided).
       let mediaArray = [];
+      const inferMediaType = url =>
+        /\.(mp4|mov|webm|m4v|avi|mkv)(\?|$)/i.test(url) ? "video" : "image";
       if (Array.isArray(media) && media.length) {
         mediaArray = media.map(m => ({
           url:  m.url,
-          type: m.type || (/\.(mp4|mov|webm|m4v)(\?|$)/i.test(m.url) ? "video" : "image"),
+          type: m.type === "video" || m.type === "image" ? m.type : inferMediaType(m.url),
         }));
       } else if (Array.isArray(mediaUrls) && mediaUrls.length) {
-        mediaArray = mediaUrls.map(url => ({
-          url,
-          type: /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url) ? "video" : "image",
-        }));
+        mediaArray = mediaUrls.map(url => ({ url, type: inferMediaType(url) }));
       }
 
+      // GHL's field naming (verified from live API error messages):
+      //   type        → the post type: "post" | "story" | "reel"
+      //   status      → "scheduled" or "draft" (inferred from scheduleDate presence)
+      // Our previous code was sending `type: "scheduled"|"now"` (wrong) AND
+      // `postType: "post"|"story"|"reel"` (wrong field name) — collision.
       const body = {
         accountIds,
         summary,
         userId,
-        postType,
-        type: scheduleDate ? "scheduled" : "now",
+        type: postType,
       };
-      if (scheduleDate) body.scheduleDate = scheduleDate;
+      if (scheduleDate) {
+        body.scheduleDate = scheduleDate;
+        body.status = "scheduled";
+      } else {
+        body.status = "draft";
+      }
       if (mediaArray.length) body.media = mediaArray;
-      if (categoryId) body.categoryId = categoryId;
-      if (tags)       body.tags       = tags;
+      if (categoryId)        body.categoryId = categoryId;
+      if (tags)              body.tags       = tags;
 
       const data = await ghlPost(`/social-media-posting/${LOCATION}/posts`, body);
       const post = data.post
