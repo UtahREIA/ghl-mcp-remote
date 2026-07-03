@@ -2296,13 +2296,14 @@ async function callTool(name, args) {
         mediaArray.push(mediaObj);
       }
 
-      // Discover which `type` value GHL accepts by attempting candidates in order.
-      // We probe on retry so we can lock in the right one going forward.
+      // GHL accepts the full MIME type as the media `type` value (verified via
+      // probing: "image"/"IMAGE" rejected, "image/jpeg" accepted).
+      // Prefer the detected MIME from the upload; fall back to sensible defaults.
       const isVideo = (uploadedContentTypes[0] || "").startsWith("video/");
+      const primaryType = uploadedContentTypes[0] || (isVideo ? "video/mp4" : "image/jpeg");
       const typeCandidates = isVideo
-        ? ["video", "VIDEO", "video/mp4", uploadedContentTypes[0] || "video/mp4"]
-        : ["image", "IMAGE", "image/jpeg", uploadedContentTypes[0] || "image/jpeg", "jpg", "jpeg", "photo"];
-      // De-duplicate while preserving order
+        ? [primaryType, "video/mp4"]
+        : [primaryType, "image/jpeg", "image/png"];
       const uniqueCandidates = [...new Set(typeCandidates.filter(Boolean))];
 
       // Build request body. GHL field mapping (from live API errors):
