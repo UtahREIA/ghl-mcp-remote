@@ -2236,31 +2236,36 @@ async function callTool(name, args) {
         for (const url of mediaUrls) inputMedia.push({ url, type: inferMediaType(url) });
       }
 
-      // Upload any external URLs to GHL first, then build the media array in
-      // GHL's expected shape: { id, url, type, thumbnailUrl? }
+      // Upload any external URLs to GHL first, then build the media array.
+      // GHL's post endpoint expects: { url, type, id?, thumbnailUrl? }
+      // where type is UPPERCASE: "IMAGE" or "VIDEO" (based on live API testing).
       const mediaArray = [];
+      const uploadedRaw = [];  // for debugging
       for (const m of inputMedia) {
         let fileObj;
         if (isGhlHosted(m.url)) {
-          // Already hosted — pass through as-is
           fileObj = { url: m.url, id: "" };
         } else {
           try {
             const uploaded = await uploadToGhl(m.url);
-            // GHL returns different shapes — pull the hosted URL and file ID
+            uploadedRaw.push(uploaded);
             fileObj = {
               id: uploaded.fileId || uploaded.id || uploaded._id || uploaded.data?.id || "",
               url: uploaded.url || uploaded.fileUrl || uploaded.hostedUrl || uploaded.data?.url || m.url,
+              thumbnailUrl: uploaded.thumbnailUrl || uploaded.data?.thumbnailUrl,
             };
           } catch (e) {
             throw new Error(`Failed to upload media to GHL library: ${e.message}. Ensure the URL is publicly accessible.`);
           }
         }
-        mediaArray.push({
-          id:   fileObj.id,
+        const rawType = (m.type === "video" || m.type === "image") ? m.type : inferMediaType(m.url);
+        const mediaObj = {
           url:  fileObj.url,
-          type: (m.type === "video" || m.type === "image") ? m.type : inferMediaType(m.url),
-        });
+          type: rawType.toUpperCase(),  // GHL expects "IMAGE" or "VIDEO"
+        };
+        if (fileObj.id)           mediaObj.id           = fileObj.id;
+        if (fileObj.thumbnailUrl) mediaObj.thumbnailUrl = fileObj.thumbnailUrl;
+        mediaArray.push(mediaObj);
       }
 
       // Build request body. GHL field mapping (from live API errors):
@@ -2292,7 +2297,8 @@ async function callTool(name, args) {
       return {
         success: data.success !== false,
         post,
-        _uploadedMedia: mediaArray,
+        _sentMedia: mediaArray,
+        _uploadedRaw: uploadedRaw,
       };
     }
 
