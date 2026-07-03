@@ -2267,8 +2267,10 @@ async function callTool(name, args) {
       }
 
       // Upload any external URLs to GHL first, then build the media array.
-      // GHL's post endpoint expects: { url, type, id?, thumbnailUrl? }
-      // where type is UPPERCASE: "IMAGE" or "VIDEO" (based on live API testing).
+      // GHL's post endpoint expects a specific shape that has been elusive.
+      // Based on repeated "Invalid media format type" errors, GHL likely wants
+      // the fileId reference and URL — NOT a `type` field. GHL infers type
+      // from the uploaded file itself.
       const mediaArray = [];
       const uploadedRaw = [];  // for debugging
       for (const m of inputMedia) {
@@ -2288,12 +2290,10 @@ async function callTool(name, args) {
             throw new Error(`Failed to upload media to GHL library: ${e.message}. Ensure the URL is publicly accessible.`);
           }
         }
-        const rawType = (m.type === "video" || m.type === "image") ? m.type : inferMediaType(m.url);
-        const mediaObj = {
-          url:  fileObj.url,
-          type: rawType.toUpperCase(),  // GHL expects "IMAGE" or "VIDEO"
-        };
-        if (fileObj.id)           mediaObj.id           = fileObj.id;
+        // GHL's expected shape (from testing): url + id (fileId reference).
+        // No `type` field — GHL infers image vs video from the uploaded file.
+        const mediaObj = { url: fileObj.url };
+        if (fileObj.id) mediaObj.id = fileObj.id;
         if (fileObj.thumbnailUrl) mediaObj.thumbnailUrl = fileObj.thumbnailUrl;
         mediaArray.push(mediaObj);
       }
@@ -2318,7 +2318,18 @@ async function callTool(name, args) {
       if (categoryId) body.categoryId = categoryId;
       if (tags)       body.tags       = tags;
 
-      const data = await ghlPost(`/social-media-posting/${LOCATION}/posts`, body);
+      let data;
+      try {
+        data = await ghlPost(`/social-media-posting/${LOCATION}/posts`, body);
+      } catch (e) {
+        // Attach debug info to error so we can see exactly what got sent
+        const debugMsg = [
+          `GHL post rejected: ${e.message}`,
+          `_sentBody: ${JSON.stringify(body)}`,
+          `_uploadedRaw: ${JSON.stringify(uploadedRaw)}`,
+        ].join(" | ");
+        throw new Error(debugMsg);
+      }
       const post = data.post
         || data.results?.post
         || data.results
