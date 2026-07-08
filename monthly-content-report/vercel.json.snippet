@@ -1,0 +1,39 @@
+Add this to the existing vercel.json in ghl-mcp-remote (merge into the "crons" array
+if one already exists):
+
+{
+  "crons": [
+    {
+      "path": "/api/cron/monthly-content-report",
+      "schedule": "0 8 1 * *"
+    }
+  ]
+}
+
+This runs at 8:00 AM UTC on the 1st of each month and pulls data for the prior month.
+
+---
+
+Env vars to add in Vercel project settings:
+
+GOOGLE_OAUTH_CLIENT_ID       from Cloud Console: Credentials -> OAuth client ID
+                             (Desktop app type)
+GOOGLE_OAUTH_CLIENT_SECRET   from the same OAuth client
+GOOGLE_OAUTH_REFRESH_TOKEN   generated once by running scripts/get-refresh-token.js
+                             locally while logged in as info@utahreia.org. This
+                             account already owns the target Sheet and (once
+                             granted GA4 Viewer access in Property Access
+                             Management) can read GA4 directly, so no service
+                             account or key file is needed.
+GA4_PROPERTY_ID              the GA4 property ID tied to GTM-PQBDRK4V
+AHREFS_API_KEY               Ahrefs API v3 key
+OPUSCLIP_API_KEY             OpusClip API key
+OPUSCLIP_ORG_ID              OpusClip org ID
+GHL_ACCESS_TOKEN             GHL token with social planner read scope
+SHEETS_SPREADSHEET_ID        1RwVLFMhkfjWFXFpMaSlq86Hj0T8YOJv6YKQi53LTPic
+                             (already created; owned by info@utahreia.org)
+CRON_SECRET                  any random string; also set in the cron config as
+                             the bearer token Vercel sends
+
+npm packages to add: googleapis, @google-analytics/data, open (dev dependency,
+only needed to run get-refresh-token.js locally, not in the deployed function)

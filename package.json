@@ -2,9 +2,11 @@
   "name": "ghl-mcp-remote",
   "version": "1.0.0",
   "description": "GHL remote MCP server for claude.ai integrations",
-  "type": "module",
+  "type": "common.js",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.2",
+    "googleapis": "^173.0.0",
+    "open": "^11.0.0",
     "zod": "^3.24.2"
   }
 }
