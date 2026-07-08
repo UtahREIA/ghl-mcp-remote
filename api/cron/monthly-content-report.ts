@@ -41,7 +41,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ga4Rows.map((r) => [r.date, r.pagePath, r.sessions, r.users, r.conversions, r.pageViews]),
     );
 
-    // Ahrefs tab intentionally skipped until Enterprise API plan is confirmed.
+    await writeRowsToTab(
+      spreadsheetId,
+      `GHL Engagement Stats - ${monthLabel}`,
+      ['Platform', 'Impressions', 'Reach', 'Engagement (Likes+Comments+Shares)', 'Posts Published'],
+      [
+        [
+          'Fill in via Claude in Chrome: GHL > Marketing > Social Planner > Analytics. See runbook for the exact prompt.',
+          '',
+          '',
+          '',
+          '',
+        ],
+      ],
+    );
 
     await writeRowsToTab(
       spreadsheetId,
