@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { pullGA4MonthlyData } from '../../lib/pullers/ga4';
-import { pullAhrefsMonthlyData } from '../../lib/pullers/ahrefs';
+// Ahrefs API requires their Enterprise plan; not currently active.
+// Re-enable once confirmed: import { pullAhrefsMonthlyData } from '../../lib/pullers/ahrefs';
 import { pullOpusClipMonthlyData } from '../../lib/pullers/opusclip';
 import { pullGHLSocialMonthlyData } from '../../lib/pullers/ghl';
 import { getOrCreateSpreadsheet, writeRowsToTab } from '../../lib/sheets';
@@ -27,9 +28,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const spreadsheetId = await getOrCreateSpreadsheet();
 
-    const [ga4Rows, ahrefsRows, opusRows, ghlRows] = await Promise.all([
+    const [ga4Rows, opusRows, ghlRows] = await Promise.all([
       pullGA4MonthlyData(startDate, endDate),
-      pullAhrefsMonthlyData(startDate, endDate),
       pullOpusClipMonthlyData(startDate),
       pullGHLSocialMonthlyData(startDate, endDate),
     ]);
@@ -41,12 +41,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ga4Rows.map((r) => [r.date, r.pagePath, r.sessions, r.users, r.conversions, r.pageViews]),
     );
 
-    await writeRowsToTab(
-      spreadsheetId,
-      `Ahrefs - ${monthLabel}`,
-      ['Date', 'Organic Traffic', 'Organic Keywords', 'Referring Domains', 'Domain Rating'],
-      ahrefsRows.map((r) => [r.date, r.organicTraffic, r.organicKeywords, r.referringDomains, r.domainRating]),
-    );
+    // Ahrefs tab intentionally skipped until Enterprise API plan is confirmed.
 
     await writeRowsToTab(
       spreadsheetId,
@@ -65,8 +60,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const summaryRows: (string | number)[][] = [
       ['GA4', 'Total Sessions', ga4Rows.reduce((sum, r) => sum + r.sessions, 0)],
       ['GA4', 'Total Conversions', ga4Rows.reduce((sum, r) => sum + r.conversions, 0)],
-      ['Ahrefs', 'Latest Organic Traffic', ahrefsRows.at(-1)?.organicTraffic ?? 0],
-      ['Ahrefs', 'Latest Domain Rating', ahrefsRows.at(-1)?.domainRating ?? 0],
       ['OpusClip', 'Clips Produced', opusRows.length],
       ['OpusClip', 'Top Clip Score', opusRows[0]?.score ?? 0],
       ['GHL Social', 'Posts Published', ghlRows.length],
@@ -81,7 +74,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       month: monthLabel,
       counts: {
         ga4: ga4Rows.length,
-        ahrefs: ahrefsRows.length,
         opusclip: opusRows.length,
         ghl: ghlRows.length,
       },

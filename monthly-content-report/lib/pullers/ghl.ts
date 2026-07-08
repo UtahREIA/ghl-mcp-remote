@@ -1,6 +1,6 @@
-// GHL API v2. Requires GHL_ACCESS_TOKEN env var (must include the social planner
-// read scope; reconnect after any scope changes since tokens do not retroactively
-// inherit new scopes).
+// GHL API v2. Reuses the existing GHL_API_KEY env var already set up in this
+// repo (must include the social planner read scope; reconnect after any scope
+// changes since tokens do not retroactively inherit new scopes).
 
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 const LOCATION_ID = 'DNirEjy0ejVwbHsaBYrn';
@@ -11,7 +11,7 @@ async function ghlGet(path: string, params: Record<string, string> = {}) {
 
   const res = await fetch(url.toString(), {
     headers: {
-      Authorization: `Bearer ${process.env.GHL_ACCESS_TOKEN}`,
+      Authorization: `Bearer ${process.env.GHL_API_KEY}`,
       Version: '2021-07-28',
       Accept: 'application/json',
     },
