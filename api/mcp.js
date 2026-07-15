@@ -277,12 +277,15 @@ const TOOLS = [
   },
   {
     name: "ghl_get_media",
-    description: "List media files (images, videos, documents) uploaded to GHL.",
+    description: "List media files AND folders in the GHL media library. Returns folder IDs (needed for folder-targeted uploads — GHL's UI doesn't expose them).",
     inputSchema: {
       type: "object",
       properties: {
-        type:  { type: "string", description: "Filter by type: image, video, document" },
-        limit: { type: "number" },
+        type:      { type: "string", description: "Filter by type: image, video, document, folder" },
+        parentId:  { type: "string", description: "List contents of a specific folder (omit to list root)" },
+        limit:     { type: "number", description: "Max results (default 20)" },
+        sortBy:    { type: "string", description: "Sort field: createdAt, name, size (default: createdAt)" },
+        sortOrder: { type: "string", enum: ["asc", "desc"], description: "Sort direction (default: desc)" },
       },
     },
   },
@@ -1725,11 +1728,25 @@ async function callTool(name, args) {
 
     // ── Media ─────────────────────────────────────────────────────────────────
     case "ghl_get_media": {
-      const { type, limit = 20 } = args;
-      let url = `/medias/?altId=${LOCATION}&altType=location&limit=${limit}`;
-      if (type) url += `&type=${type}`;
+      const { type, limit = 20, parentId, sortBy = "createdAt", sortOrder = "desc" } = args;
+      // GHL's correct endpoint is /medias/files (not /medias/).
+      // Returns both files AND folders — needed to discover folder IDs since
+      // GHL's UI doesn't expose them.
+      let url = `/medias/files?altId=${LOCATION}&altType=location&limit=${limit}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
+      if (type)     url += `&type=${type}`;
+      if (parentId) url += `&parentId=${parentId}`;
       const data = await ghl(url);
-      return (data.medias || data.files || []).map(m => ({ id: m.id, name: m.name, url: m.url, type: m.type, size: m.size }));
+      const items = data.files || data.medias || data.data || [];
+      return items.map(m => ({
+        id:        m._id || m.id,
+        name:      m.name,
+        url:       m.url,
+        type:      m.type,
+        size:      m.size,
+        parentId:  m.parentId || null,
+        isFolder:  m.type === "folder" || m.isFolder || false,
+        createdAt: m.createdAt || m.dateAdded || "",
+      }));
     }
 
     // ── Products ──────────────────────────────────────────────────────────────
