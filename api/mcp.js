@@ -2884,20 +2884,39 @@ async function callTool(name, args) {
       // this time capture and expose which paths were tried and what came back
       const fieldDebug = { schemaHadFields: fields.length > 0, attempts: [] };
       if (fields.length === 0) {
+        // GHL keys look like "custom_objects.vendor_resources" — some endpoints
+        // want the full key, some might want just "vendor_resources", some want the ID.
+        const objectId  = schema.id || schema._id;
+        const shortKey  = objectKey.includes(".") ? objectKey.split(".").pop() : objectKey;
         const candidatePaths = [
-          `/objects/${objectKey}/fields?locationId=${LOCATION}`,
-          `/objects/${objectKey}/properties?locationId=${LOCATION}`,
-          `/custom-objects/${objectKey}/fields?locationId=${LOCATION}`,
-          `/custom-fields/objects/${objectKey}?locationId=${LOCATION}`,
-          `/custom-fields/?locationId=${LOCATION}&objectKey=${objectKey}`,
-          `/custom-fields/?locationId=${LOCATION}&objectId=${schema.id || schema._id}`,
-          `/locations/${LOCATION}/customFields?objectKey=${objectKey}`,
+          // Try with internal ID (GHL often uses IDs for detail routes)
+          `/objects/${objectId}/fields?locationId=${LOCATION}`,
+          `/objects/${objectId}/properties?locationId=${LOCATION}`,
+          `/custom-objects/${objectId}/fields?locationId=${LOCATION}`,
+          // Try with short key
+          `/objects/${shortKey}/fields?locationId=${LOCATION}`,
+          `/custom-objects/${shortKey}/fields?locationId=${LOCATION}`,
+          // Custom fields API with various object references
+          `/custom-fields/object/${objectId}?locationId=${LOCATION}`,
+          `/custom-fields/object/${objectKey}?locationId=${LOCATION}`,
+          `/custom-fields/?locationId=${LOCATION}&model=${objectKey}`,
+          `/custom-fields/?locationId=${LOCATION}&model=custom_object&objectKey=${objectKey}`,
+          // Plural objects list (might include fields inline)
+          `/objects/?locationId=${LOCATION}&fetchProperties=true`,
+          `/objects/?locationId=${LOCATION}&includeProperties=true`,
+          // Records search with field defs
+          `/objects/${objectKey}/records/definitions?locationId=${LOCATION}`,
         ];
         for (const path of candidatePaths) {
           try {
             const r = await ghl(path);
-            const found = r.fields || r.properties || r.customFields || r.data || r.results || [];
-            fieldDebug.attempts.push({ path, status: "ok", keys: Object.keys(r), foundCount: found.length });
+            // For plural list endpoints, look inside the array for our specific object
+            let found = r.fields || r.properties || r.customFields || r.data || r.results || [];
+            if (!found.length && Array.isArray(r.objects)) {
+              const matched = r.objects.find(o => (o.id === objectId) || (o.key === objectKey));
+              if (matched) found = matched.fields || matched.properties || [];
+            }
+            fieldDebug.attempts.push({ path, status: "ok", keys: Object.keys(r).slice(0, 20), foundCount: Array.isArray(found) ? found.length : 0 });
             if (Array.isArray(found) && found.length > 0) {
               fields = found;
               fieldDebug.workingPath = path;
