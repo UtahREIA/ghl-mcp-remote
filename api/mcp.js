@@ -2863,8 +2863,26 @@ async function callTool(name, args) {
 
     case "ghl_get_object_schema": {
       const { objectKey } = args;
-      const data = await ghl(`/objects/${objectKey}?locationId=${LOCATION}&fetchProperties=true`);
-      return data.object || data;
+      // Fetch the schema
+      const data = await ghlTry([
+        `/objects/${objectKey}?locationId=${LOCATION}&fetchProperties=true`,
+        `/objects/${objectKey}?locationId=${LOCATION}`,
+        `/custom-objects/${objectKey}?locationId=${LOCATION}`,
+      ]);
+      const schema = data.object || data;
+      // Fields often live on a separate endpoint — fetch them and merge in
+      let fields = schema.fields || schema.properties || [];
+      if (!fields || fields.length === 0) {
+        try {
+          const fieldsData = await ghlTry([
+            `/objects/${objectKey}/fields?locationId=${LOCATION}`,
+            `/custom-objects/${objectKey}/fields?locationId=${LOCATION}`,
+            `/custom-fields/?locationId=${LOCATION}&objectKey=${objectKey}`,
+          ]);
+          fields = fieldsData.fields || fieldsData.customFields || fieldsData.data || [];
+        } catch { /* no separate fields endpoint, leave as-is */ }
+      }
+      return { ...schema, fields };
     }
 
     case "ghl_create_object_schema": {
@@ -2909,29 +2927,54 @@ async function callTool(name, args) {
         throw new Error("Must specify at least one of fieldsToAdd or fieldsToRemove");
       }
 
-      const results = { added: [], removed: [], errors: [] };
+      // GHL doesn't expose per-field endpoints on surveys. Strategy:
+      // 1. GET the survey with its full fields array
+      // 2. Mutate the array (add/remove)
+      // 3. PUT the whole survey back
+      let survey;
+      try {
+        const data = await ghlTry([
+          `/surveys/${surveyId}?locationId=${LOCATION}`,
+          `/surveys/${surveyId}`,
+        ]);
+        survey = data.survey || data;
+      } catch (e) {
+        throw new Error(`Could not fetch survey ${surveyId} to modify: ${e.message}. GHL may not expose a GET /surveys/{id} endpoint — survey field editing may only be possible through the GHL UI.`);
+      }
 
-      // Add new fields
-      for (const field of fieldsToAdd) {
-        try {
-          const data = await ghlPost(`/surveys/${surveyId}/fields`, {
-            locationId: LOCATION,
-            ...field,
-          });
-          results.added.push(data.field || data);
-        } catch (e) {
-          results.errors.push({ action: "add", field: field.name || field.fieldKey, error: e.message });
+      const currentFields = survey.fields || survey.formFields || [];
+      const results = { added: [], removed: [], errors: [], _beforeCount: currentFields.length };
+
+      // Build new fields array
+      let newFields = [...currentFields];
+
+      // Remove first (so we don't accidentally remove newly-added ones)
+      for (const fieldRef of fieldsToRemove) {
+        const before = newFields.length;
+        newFields = newFields.filter(f => (f.id !== fieldRef) && (f.fieldKey !== fieldRef) && (f._id !== fieldRef));
+        if (newFields.length < before) {
+          results.removed.push(fieldRef);
+        } else {
+          results.errors.push({ action: "remove", field: fieldRef, error: "Field not found in survey" });
         }
       }
 
-      // Remove fields by ID or key
-      for (const fieldRef of fieldsToRemove) {
-        try {
-          await ghlDelete(`/surveys/${surveyId}/fields/${fieldRef}?locationId=${LOCATION}`);
-          results.removed.push(fieldRef);
-        } catch (e) {
-          results.errors.push({ action: "remove", field: fieldRef, error: e.message });
-        }
+      // Add new fields
+      for (const field of fieldsToAdd) {
+        newFields.push(field);
+        results.added.push(field);
+      }
+
+      // PUT the whole survey back with the new fields array
+      try {
+        const updateBody = { ...survey, fields: newFields, formFields: newFields };
+        delete updateBody._id; delete updateBody.id; delete updateBody.locationId;
+        await ghlPut(`/surveys/${surveyId}?locationId=${LOCATION}`, updateBody);
+        results._afterCount = newFields.length;
+      } catch (e) {
+        // Roll back the reported results since the PUT failed
+        results.errors.push({ action: "putSurvey", error: e.message });
+        throw new Error(`Survey field mutation prepared but PUT failed: ${e.message}. GHL may require survey edits through the UI. Prepared state: added ${results.added.length}, removed ${results.removed.length}.`);
       }
 
       return results;
