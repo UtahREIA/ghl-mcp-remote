@@ -1003,6 +1003,63 @@ const TOOLS = [
     },
   },
   {
+    name: "ghl_update_object_field",
+    description: "Update a field on a custom object schema — used to modify dropdown/select options, field name, or other field properties. Full replacement of the field definition.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        objectKey:   { type: "string", description: "Custom object schema key (e.g. 'vendor_resources' or 'custom_objects.vendor_resources')" },
+        fieldId:     { type: "string", description: "Field ID to update (from ghl_get_object_schema response)" },
+        name:        { type: "string" },
+        placeholder: { type: "string" },
+        showInForms: { type: "boolean" },
+        options:     {
+          type: "array",
+          description: "Full replacement array of options for dropdown/select/radio/checkbox fields. Each option: { key, label }.",
+          items: {
+            type: "object",
+            properties: {
+              key:   { type: "string" },
+              label: { type: "string" },
+            },
+          },
+        },
+      },
+      required: ["objectKey", "fieldId"],
+    },
+  },
+  {
+    name: "ghl_update_survey_fields",
+    description: "Add or remove fields on an existing GHL survey. Complements ghl_update_form which only updates the name.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        surveyId:      { type: "string", description: "Survey ID (from ghl_get_surveys)" },
+        fieldsToAdd:   {
+          type: "array",
+          description: "Fields to add to the survey",
+          items: {
+            type: "object",
+            properties: {
+              name:     { type: "string" },
+              fieldKey: { type: "string", description: "Unique key for the field" },
+              dataType: { type: "string", description: "TEXT, LARGE_TEXT, NUMERICAL, PHONE, EMAIL, CHECKBOX, SINGLE_OPTIONS, MULTIPLE_OPTIONS, DATE, RADIO" },
+              required: { type: "boolean" },
+              options:  { type: "array", items: { type: "object" }, description: "For select/radio/checkbox types" },
+            },
+            required: ["name", "dataType"],
+          },
+        },
+        fieldsToRemove: {
+          type: "array",
+          items: { type: "string" },
+          description: "Field IDs or field keys to remove from the survey",
+        },
+      },
+      required: ["surveyId"],
+    },
+  },
+  {
     name: "ghl_update_object_schema",
     description: "Update an existing custom object schema.",
     inputSchema: {
@@ -2824,6 +2881,60 @@ async function callTool(name, args) {
       }
       const data = await ghlPut(`/objects/${objectKey}`, body);
       return data.object || data;
+    }
+
+    case "ghl_update_object_field": {
+      const { objectKey, fieldId, ...fields } = args;
+      const body = { locationId: LOCATION };
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) body[k] = v;
+      }
+      // GHL exposes both /objects/ and /custom-objects/ paths for this — try in order
+      let data;
+      try {
+        data = await ghlPut(`/objects/${objectKey}/fields/${fieldId}`, body);
+      } catch (e1) {
+        try {
+          data = await ghlPut(`/custom-objects/${objectKey}/fields/${fieldId}`, body);
+        } catch (e2) {
+          throw new Error(`Failed to update object field. Attempts:\n1. /objects/${objectKey}/fields/${fieldId}: ${e1.message}\n2. /custom-objects/${objectKey}/fields/${fieldId}: ${e2.message}`);
+        }
+      }
+      return data.field || data.customField || data;
+    }
+
+    case "ghl_update_survey_fields": {
+      const { surveyId, fieldsToAdd = [], fieldsToRemove = [] } = args;
+      if (fieldsToAdd.length === 0 && fieldsToRemove.length === 0) {
+        throw new Error("Must specify at least one of fieldsToAdd or fieldsToRemove");
+      }
+
+      const results = { added: [], removed: [], errors: [] };
+
+      // Add new fields
+      for (const field of fieldsToAdd) {
+        try {
+          const data = await ghlPost(`/surveys/${surveyId}/fields`, {
+            locationId: LOCATION,
+            ...field,
+          });
+          results.added.push(data.field || data);
+        } catch (e) {
+          results.errors.push({ action: "add", field: field.name || field.fieldKey, error: e.message });
+        }
+      }
+
+      // Remove fields by ID or key
+      for (const fieldRef of fieldsToRemove) {
+        try {
+          await ghlDelete(`/surveys/${surveyId}/fields/${fieldRef}?locationId=${LOCATION}`);
+          results.removed.push(fieldRef);
+        } catch (e) {
+          results.errors.push({ action: "remove", field: fieldRef, error: e.message });
+        }
+      }
+
+      return results;
     }
 
     case "ghl_get_object_records": {
