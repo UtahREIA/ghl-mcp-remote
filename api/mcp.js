@@ -1030,7 +1030,7 @@ const TOOLS = [
   },
   {
     name: "ghl_update_survey_fields",
-    description: "Add or remove fields on an existing GHL survey. Complements ghl_update_form which only updates the name.",
+    description: "⚠️ NOT SUPPORTED — GHL's public API does not expose survey CRUD (confirmed via live testing 2026-07-02: IAM Service rejects all /surveys/{id}/... routes). Survey fields must be edited in the GHL UI. This tool is kept as a placeholder in case GHL adds support later; calling it returns an explanatory error.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2863,26 +2863,57 @@ async function callTool(name, args) {
 
     case "ghl_get_object_schema": {
       const { objectKey } = args;
-      // Fetch the schema
-      const data = await ghlTry([
+      // Fetch the schema first (try multiple param names for including properties)
+      const schemaData = await ghlTry([
         `/objects/${objectKey}?locationId=${LOCATION}&fetchProperties=true`,
+        `/objects/${objectKey}?locationId=${LOCATION}&includeProperties=true`,
+        `/objects/${objectKey}?locationId=${LOCATION}&expand=properties`,
         `/objects/${objectKey}?locationId=${LOCATION}`,
         `/custom-objects/${objectKey}?locationId=${LOCATION}`,
       ]);
-      const schema = data.object || data;
-      // Fields often live on a separate endpoint — fetch them and merge in
-      let fields = schema.fields || schema.properties || [];
-      if (!fields || fields.length === 0) {
-        try {
-          const fieldsData = await ghlTry([
-            `/objects/${objectKey}/fields?locationId=${LOCATION}`,
-            `/custom-objects/${objectKey}/fields?locationId=${LOCATION}`,
-            `/custom-fields/?locationId=${LOCATION}&objectKey=${objectKey}`,
-          ]);
-          fields = fieldsData.fields || fieldsData.customFields || fieldsData.data || [];
-        } catch { /* no separate fields endpoint, leave as-is */ }
+      const schema = schemaData.object || schemaData;
+
+      // Look for fields under any of the known key names
+      let fields = schema.fields
+                || schema.properties
+                || schema.customFields
+                || schema.propertiesData
+                || [];
+
+      // If schema didn't include fields, try fields-specific endpoints — but
+      // this time capture and expose which paths were tried and what came back
+      const fieldDebug = { schemaHadFields: fields.length > 0, attempts: [] };
+      if (fields.length === 0) {
+        const candidatePaths = [
+          `/objects/${objectKey}/fields?locationId=${LOCATION}`,
+          `/objects/${objectKey}/properties?locationId=${LOCATION}`,
+          `/custom-objects/${objectKey}/fields?locationId=${LOCATION}`,
+          `/custom-fields/objects/${objectKey}?locationId=${LOCATION}`,
+          `/custom-fields/?locationId=${LOCATION}&objectKey=${objectKey}`,
+          `/custom-fields/?locationId=${LOCATION}&objectId=${schema.id || schema._id}`,
+          `/locations/${LOCATION}/customFields?objectKey=${objectKey}`,
+        ];
+        for (const path of candidatePaths) {
+          try {
+            const r = await ghl(path);
+            const found = r.fields || r.properties || r.customFields || r.data || r.results || [];
+            fieldDebug.attempts.push({ path, status: "ok", keys: Object.keys(r), foundCount: found.length });
+            if (Array.isArray(found) && found.length > 0) {
+              fields = found;
+              fieldDebug.workingPath = path;
+              break;
+            }
+          } catch (e) {
+            fieldDebug.attempts.push({ path, status: "error", error: e.message });
+          }
+        }
       }
-      return { ...schema, fields };
+
+      return {
+        ...schema,
+        fields,
+        _fieldDebug: fieldDebug,
+      };
     }
 
     case "ghl_create_object_schema": {
@@ -2922,62 +2953,18 @@ async function callTool(name, args) {
     }
 
     case "ghl_update_survey_fields": {
-      const { surveyId, fieldsToAdd = [], fieldsToRemove = [] } = args;
-      if (fieldsToAdd.length === 0 && fieldsToRemove.length === 0) {
-        throw new Error("Must specify at least one of fieldsToAdd or fieldsToRemove");
-      }
-
-      // GHL doesn't expose per-field endpoints on surveys. Strategy:
-      // 1. GET the survey with its full fields array
-      // 2. Mutate the array (add/remove)
-      // 3. PUT the whole survey back
-      let survey;
-      try {
-        const data = await ghlTry([
-          `/surveys/${surveyId}?locationId=${LOCATION}`,
-          `/surveys/${surveyId}`,
-        ]);
-        survey = data.survey || data;
-      } catch (e) {
-        throw new Error(`Could not fetch survey ${surveyId} to modify: ${e.message}. GHL may not expose a GET /surveys/{id} endpoint — survey field editing may only be possible through the GHL UI.`);
-      }
-
-      const currentFields = survey.fields || survey.formFields || [];
-      const results = { added: [], removed: [], errors: [], _beforeCount: currentFields.length };
-
-      // Build new fields array
-      let newFields = [...currentFields];
-
-      // Remove first (so we don't accidentally remove newly-added ones)
-      for (const fieldRef of fieldsToRemove) {
-        const before = newFields.length;
-        newFields = newFields.filter(f => (f.id !== fieldRef) && (f.fieldKey !== fieldRef) && (f._id !== fieldRef));
-        if (newFields.length < before) {
-          results.removed.push(fieldRef);
-        } else {
-          results.errors.push({ action: "remove", field: fieldRef, error: "Field not found in survey" });
-        }
-      }
-
-      // Add new fields
-      for (const field of fieldsToAdd) {
-        newFields.push(field);
-        results.added.push(field);
-      }
-
-      // PUT the whole survey back with the new fields array
-      try {
-        const updateBody = { ...survey, fields: newFields, formFields: newFields };
-        delete updateBody._id; delete updateBody.id; delete updateBody.locationId;
-        await ghlPut(`/surveys/${surveyId}?locationId=${LOCATION}`, updateBody);
-        results._afterCount = newFields.length;
-      } catch (e) {
-        // Roll back the reported results since the PUT failed
-        results.errors.push({ action: "putSurvey", error: e.message });
-        throw new Error(`Survey field mutation prepared but PUT failed: ${e.message}. GHL may require survey edits through the UI. Prepared state: added ${results.added.length}, removed ${results.removed.length}.`);
-      }
-
-      return results;
+      // Verified via live testing on 2026-07-02: GHL's public API does not
+      // expose survey CRUD at all. The IAM Service returns:
+      //   "This route is not yet supported by the IAM Service. Please update your IAM config."
+      // for GET/PUT/POST/DELETE on any /surveys/{id}/... path. This is a hard
+      // platform limitation, not a wrapper bug. Fail fast with clear guidance.
+      throw new Error(
+        "ghl_update_survey_fields is not supported by GHL's public API. " +
+        "GHL's IAM Service does not currently expose surveys for programmatic field editing " +
+        "(confirmed by GHL error: \"This route is not yet supported by the IAM Service\"). " +
+        "Survey fields must be edited manually in the GHL UI: Sites → Surveys → [survey] → Edit. " +
+        "If GHL adds survey API support in the future, this tool can be re-enabled."
+      );
     }
 
     case "ghl_get_object_records": {
