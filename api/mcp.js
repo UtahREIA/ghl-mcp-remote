@@ -979,7 +979,7 @@ const TOOLS = [
   },
   {
     name: "ghl_get_object_schema",
-    description: "Get full schema details for a specific custom object type, including all fields.",
+    description: "Get schema details for a custom object type (labels, icon, key, requiredProperties, searchableProperties, etc.). NOTE: GHL's public API does not return field definitions / field IDs on this endpoint — the returned `fields` array will typically be empty. To get a field ID for ghl_update_object_field, obtain it from the GHL UI (open the field in Settings → Custom Objects; the URL contains the ID).",
     inputSchema: {
       type: "object",
       properties: {
@@ -1004,7 +1004,7 @@ const TOOLS = [
   },
   {
     name: "ghl_update_object_field",
-    description: "Update a field on a custom object schema — used to modify dropdown/select options, field name, or other field properties. Full replacement of the field definition.",
+    description: "Update a field on a custom object schema — modify dropdown options, field name, placeholder, etc. IMPORTANT: fieldId must be obtained manually from the GHL UI (Settings → Custom Objects → click the field → the URL contains the ID). GHL's API does not expose a way to list custom object field definitions programmatically.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2863,75 +2863,19 @@ async function callTool(name, args) {
 
     case "ghl_get_object_schema": {
       const { objectKey } = args;
-      // Fetch the schema first (try multiple param names for including properties)
-      const schemaData = await ghlTry([
-        `/objects/${objectKey}?locationId=${LOCATION}&fetchProperties=true`,
-        `/objects/${objectKey}?locationId=${LOCATION}&includeProperties=true`,
-        `/objects/${objectKey}?locationId=${LOCATION}&expand=properties`,
-        `/objects/${objectKey}?locationId=${LOCATION}`,
-        `/custom-objects/${objectKey}?locationId=${LOCATION}`,
-      ]);
-      const schema = schemaData.object || schemaData;
-
-      // Look for fields under any of the known key names
-      let fields = schema.fields
-                || schema.properties
-                || schema.customFields
-                || schema.propertiesData
-                || [];
-
-      // If schema didn't include fields, try fields-specific endpoints — but
-      // this time capture and expose which paths were tried and what came back
-      const fieldDebug = { schemaHadFields: fields.length > 0, attempts: [] };
-      if (fields.length === 0) {
-        // GHL keys look like "custom_objects.vendor_resources" — some endpoints
-        // want the full key, some might want just "vendor_resources", some want the ID.
-        const objectId  = schema.id || schema._id;
-        const shortKey  = objectKey.includes(".") ? objectKey.split(".").pop() : objectKey;
-        const candidatePaths = [
-          // Try with internal ID (GHL often uses IDs for detail routes)
-          `/objects/${objectId}/fields?locationId=${LOCATION}`,
-          `/objects/${objectId}/properties?locationId=${LOCATION}`,
-          `/custom-objects/${objectId}/fields?locationId=${LOCATION}`,
-          // Try with short key
-          `/objects/${shortKey}/fields?locationId=${LOCATION}`,
-          `/custom-objects/${shortKey}/fields?locationId=${LOCATION}`,
-          // Custom fields API with various object references
-          `/custom-fields/object/${objectId}?locationId=${LOCATION}`,
-          `/custom-fields/object/${objectKey}?locationId=${LOCATION}`,
-          `/custom-fields/?locationId=${LOCATION}&model=${objectKey}`,
-          `/custom-fields/?locationId=${LOCATION}&model=custom_object&objectKey=${objectKey}`,
-          // Plural objects list (might include fields inline)
-          `/objects/?locationId=${LOCATION}&fetchProperties=true`,
-          `/objects/?locationId=${LOCATION}&includeProperties=true`,
-          // Records search with field defs
-          `/objects/${objectKey}/records/definitions?locationId=${LOCATION}`,
-        ];
-        for (const path of candidatePaths) {
-          try {
-            const r = await ghl(path);
-            // For plural list endpoints, look inside the array for our specific object
-            let found = r.fields || r.properties || r.customFields || r.data || r.results || [];
-            if (!found.length && Array.isArray(r.objects)) {
-              const matched = r.objects.find(o => (o.id === objectId) || (o.key === objectKey));
-              if (matched) found = matched.fields || matched.properties || [];
-            }
-            fieldDebug.attempts.push({ path, status: "ok", keys: Object.keys(r).slice(0, 20), foundCount: Array.isArray(found) ? found.length : 0 });
-            if (Array.isArray(found) && found.length > 0) {
-              fields = found;
-              fieldDebug.workingPath = path;
-              break;
-            }
-          } catch (e) {
-            fieldDebug.attempts.push({ path, status: "error", error: e.message });
-          }
-        }
-      }
-
+      // Single call, no probing. GHL's public API doesn't expose custom object
+      // field definitions via any documented endpoint (verified via extensive
+      // path testing on 2026-07-02). Field IDs must be obtained from the GHL UI:
+      //   Settings → Custom Objects → [object] → click a field → URL contains the ID.
+      const data = await ghl(`/objects/${objectKey}?locationId=${LOCATION}&fetchProperties=true`);
+      const schema = data.object || data;
+      const fields = schema.fields || schema.properties || schema.customFields || [];
       return {
         ...schema,
         fields,
-        _fieldDebug: fieldDebug,
+        _note: fields.length === 0
+          ? "GHL's public API does not return field definitions for custom objects. To get field IDs for ghl_update_object_field, open the field in the GHL UI (Settings → Custom Objects) — the URL contains the field ID. Property KEYS are visible in requiredProperties / searchableProperties / primaryDisplayProperty on this schema."
+          : undefined,
       };
     }
 
