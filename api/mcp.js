@@ -1789,12 +1789,10 @@ async function callTool(name, args) {
       // GHL's correct endpoint is /medias/files (not /medias/).
       // Returns both files AND folders — needed to discover folder IDs since
       // GHL's UI doesn't expose them.
-      let url = `/medias/files?altId=${LOCATION}&altType=location&limit=${limit}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
-      if (type)     url += `&type=${type}`;
-      if (parentId) url += `&parentId=${parentId}`;
-      const data = await ghl(url);
-      const items = data.files || data.medias || data.data || [];
-      return items.map(m => ({
+      // GHL requires `type` param. If not specified, fetch all media types and merge.
+      const typesToFetch = type ? [type] : ["image", "video", "audio", "document", "folder"];
+
+      const mapItem = m => ({
         id:        m._id || m.id,
         name:      m.name,
         url:       m.url,
@@ -1803,7 +1801,26 @@ async function callTool(name, args) {
         parentId:  m.parentId || null,
         isFolder:  m.type === "folder" || m.isFolder || false,
         createdAt: m.createdAt || m.dateAdded || "",
-      }));
+      });
+
+      const allItems = [];
+      const seenIds = new Set();
+      for (const t of typesToFetch) {
+        let url = `/medias/files?altId=${LOCATION}&altType=location&limit=${limit}&sortBy=${sortBy}&sortOrder=${sortOrder}&type=${t}`;
+        if (parentId) url += `&parentId=${parentId}`;
+        try {
+          const data = await ghl(url);
+          const items = data.files || data.medias || data.data || [];
+          for (const item of items) {
+            const id = item._id || item.id;
+            if (id && !seenIds.has(id)) {
+              seenIds.add(id);
+              allItems.push(mapItem(item));
+            }
+          }
+        } catch { /* skip types this location doesn't support */ }
+      }
+      return allItems;
     }
 
     // ── Products ──────────────────────────────────────────────────────────────
