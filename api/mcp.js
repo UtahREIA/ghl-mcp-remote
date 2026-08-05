@@ -556,6 +556,7 @@ const TOOLS = [
         mediaUrls:   { type: "array", items: { type: "string" }, description: "Legacy — plain URL strings. Auto-converted to structured 'media' format. Use 'media' for new code." },
         categoryId:  { type: "string" },
         tags:        { type: "array", items: { type: "string" } },
+        firstComment:{ type: "string", description: "Text to post as the first comment right after the main post. Used for links (Facebook) and hashtag stuffing (Instagram) per Comments Strategy SOP. Sent to GHL's firstComment field; support varies by platform." },
       },
       required: ["accountIds", "summary", "userId"],
     },
@@ -2282,7 +2283,7 @@ async function callTool(name, args) {
 
     // ── Tier 3 Write: Social ──────────────────────────────────────────────────
     case "ghl_create_social_post": {
-      const { accountIds, summary, userId, postType = "post", scheduleDate, media, mediaUrls, categoryId, tags } = args;
+      const { accountIds, summary, userId, postType = "post", scheduleDate, media, mediaUrls, categoryId, tags, firstComment } = args;
 
       if (!Array.isArray(accountIds) || accountIds.length === 0) {
         throw new Error("accountIds is required and must be a non-empty array. Get IDs via ghl_get_social_accounts.");
@@ -2416,6 +2417,10 @@ async function callTool(name, args) {
       }
       if (categoryId) body.categoryId = categoryId;
       if (tags)       body.tags       = tags;
+      // First comment: GHL's Social Planner composer supports auto-posting a
+      // comment right after the parent post. Verified field name (from GHL API v2):
+      // `firstComment` accepts a plain string.
+      if (firstComment) body.firstComment = firstComment;
 
       // If we have media, probe candidate `type` values until one succeeds
       // (or all fail — then throw with full context).
