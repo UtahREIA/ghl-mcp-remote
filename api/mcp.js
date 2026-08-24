@@ -532,12 +532,12 @@ const TOOLS = [
   },
   {
     name: "ghl_create_social_post",
-    description: "Schedule a social media post, story, or reel via GHL Social Planner. Supports Facebook, Instagram, TikTok, LinkedIn, YouTube, and GHL Community.",
+    description: "Schedule a social media post, story, or reel via GHL Social Planner. Supports Facebook, Instagram, TikTok, LinkedIn, YouTube, and GHL Community. NOTE: Stories (postType='story') do NOT support captions — the `summary` field is silently dropped for stories because Facebook's API rejects captions on stories entirely. For stories, rely on media only.",
     inputSchema: {
       type: "object",
       properties: {
         accountIds:  { type: "array", items: { type: "string" }, description: "Social account IDs to post to (get via ghl_get_social_accounts)" },
-        summary:     { type: "string", description: "Post caption / content text" },
+        summary:     { type: "string", description: "Post caption / content text. Required for post and reel; IGNORED for story (Facebook API rejects captions on stories). Safe to omit for stories." },
         userId:      { type: "string", description: "GHL user ID for whom this post is being scheduled (get via ghl_get_users). Required by GHL for scheduling." },
         postType:    { type: "string", enum: ["post", "story", "reel"], description: "Content type. 'reel' for short-form video (IG/FB), 'story' for 24h stories, 'post' for standard feed posts. Default: post" },
         scheduleDate:{ type: "string", description: "ISO datetime for scheduled posts (omit to post immediately)" },
@@ -2288,10 +2288,15 @@ async function callTool(name, args) {
       if (!Array.isArray(accountIds) || accountIds.length === 0) {
         throw new Error("accountIds is required and must be a non-empty array. Get IDs via ghl_get_social_accounts.");
       }
-      if (!summary) throw new Error("summary (post content) is required");
       if (!userId)  throw new Error("userId is required by GHL. Get user IDs via ghl_get_users.");
       if (!["post", "story", "reel"].includes(postType)) {
         throw new Error("postType must be one of: post, story, reel");
+      }
+      // Stories: GHL/Facebook API rejects captions on stories with
+      // "Facebook Story will not support caption for publishing post directly".
+      // Summary is optional for stories; if provided it's silently dropped.
+      if (postType !== "story" && !summary) {
+        throw new Error("summary (post content) is required for post and reel types");
       }
 
       // Helper: upload an external URL to GHL's media library.
@@ -2404,11 +2409,14 @@ async function callTool(name, args) {
       //   media  → array of { id, url, type } (empty array is valid for text-only)
       const body = {
         accountIds,
-        summary,
         userId,
         type: postType,
         media: mediaArray,  // always send, even if empty (GHL requires the field)
       };
+      // Stories reject `summary` entirely — omit it. For post/reel, include even if empty string.
+      if (postType !== "story") {
+        body.summary = summary || "";
+      }
       if (scheduleDate) {
         body.scheduleDate = scheduleDate;
         body.status = "scheduled";
