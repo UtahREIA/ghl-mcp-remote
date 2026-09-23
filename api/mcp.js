@@ -1758,12 +1758,33 @@ async function callTool(name, args) {
     // ── Tasks ─────────────────────────────────────────────────────────────────
     case "ghl_get_tasks": {
       const { contactId, limit = 20 } = args;
+      // GHL v2: per-contact tasks use POST search, not GET
       if (contactId) {
-        const data = await ghl(`/contacts/${contactId}/tasks`);
-        return data.tasks || [];
+        try {
+          const data = await ghlPost(`/contacts/${contactId}/tasks/search`, {});
+          return data.tasks || data.data || [];
+        } catch {
+          // Fallback to older GET (some accounts)
+          const data = await ghl(`/contacts/${contactId}/tasks`);
+          return data.tasks || [];
+        }
       }
-      const data = await ghl(`/contacts/tasks?locationId=${LOCATION}&limit=${limit}`);
-      return data.tasks || [];
+      // Location-wide search — POST with location filter
+      const data = await ghlPost(`/contacts/tasks/search`, {
+        locationId: LOCATION,
+        completed: false,
+        limit,
+      });
+      return (data.tasks || data.data || []).map(t => ({
+        id:          t.id || t._id,
+        title:       t.title || t.name || "",
+        description: t.description || t.body || "",
+        contactId:   t.contactId || "",
+        assignedTo:  t.assignedTo || "",
+        completed:   t.completed === true,
+        dueDate:     t.dueDate || "",
+        createdAt:   t.createdAt || t.dateAdded || "",
+      }));
     }
 
     // ── Calendar Resources ────────────────────────────────────────────────────
@@ -1836,8 +1857,18 @@ async function callTool(name, args) {
       return data.prices || data;
     }
     case "ghl_get_product_collections": {
-      const data = await ghl(`/products/collections/?locationId=${LOCATION}`);
-      return data.collections || data;
+      // GHL requires altId + altType (enum: "location"|"agency") — same pattern
+      // as /medias endpoint. locationId query param returns 400.
+      const data = await ghl(`/products/collections?altId=${LOCATION}&altType=location&limit=100`);
+      const items = data.collections || data.data || [];
+      return Array.isArray(items) ? items.map(c => ({
+        id:          c.id || c._id,
+        name:        c.name,
+        slug:        c.slug || "",
+        image:       c.image || "",
+        seo:         c.seo || {},
+        createdAt:   c.createdAt || "",
+      })) : items;
     }
 
     // ── Associations ──────────────────────────────────────────────────────────
@@ -1849,12 +1880,35 @@ async function callTool(name, args) {
     // ── Documents ─────────────────────────────────────────────────────────────
     case "ghl_get_documents": {
       const { limit = 20 } = args;
-      const data = await ghl(`/documents/?locationId=${LOCATION}&limit=${limit}`);
-      return data.documents || data.proposals || [];
+      // GHL v2 exposes documents/contracts under /proposals/ (verified 2026-09-23)
+      const data = await ghlTry([
+        `/proposals/documents?altId=${LOCATION}&altType=location&limit=${limit}`,
+        `/proposals/document/list?locationId=${LOCATION}&limit=${limit}`,
+        `/documents/?altId=${LOCATION}&altType=location&limit=${limit}`,
+      ]);
+      const items = data.documents || data.proposals || data.data || [];
+      return items.map(d => ({
+        id:        d.id || d._id,
+        name:      d.name || d.title || "",
+        status:    d.status || "",
+        contactId: d.contactId || "",
+        createdAt: d.createdAt || d.dateAdded || "",
+        updatedAt: d.updatedAt || "",
+      }));
     }
     case "ghl_get_document_templates": {
-      const data = await ghl(`/documents/templates?locationId=${LOCATION}`);
-      return data.templates || data;
+      const data = await ghlTry([
+        `/proposals/templates?altId=${LOCATION}&altType=location`,
+        `/proposals/template/list?locationId=${LOCATION}`,
+        `/documents/template/list?locationId=${LOCATION}`,
+      ]);
+      const items = data.templates || data.data || [];
+      return Array.isArray(items) ? items.map(t => ({
+        id:        t.id || t._id,
+        name:      t.name || t.title || "",
+        createdAt: t.createdAt || t.dateAdded || "",
+        updatedAt: t.updatedAt || "",
+      })) : items;
     }
 
     // ── Social Media Planner ──────────────────────────────────────────────────
