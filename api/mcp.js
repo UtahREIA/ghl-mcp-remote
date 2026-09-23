@@ -1888,8 +1888,10 @@ async function callTool(name, args) {
       }));
     }
     case "ghl_get_document_templates": {
-      // GHL error told us: /proposals/templates requires locationId (not altId)
-      const data = await ghl(`/proposals/templates?locationId=${LOCATION}&limit=100`);
+      // GHL error told us: requires locationId (not altId) AND enforces max limit of 21
+      const { limit = 20 } = args;
+      const capped = Math.min(limit, 21);
+      const data = await ghl(`/proposals/templates?locationId=${LOCATION}&limit=${capped}`);
       const items = data.templates || data.data || [];
       return Array.isArray(items) ? items.map(t => ({
         id:        t.id || t._id,
