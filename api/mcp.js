@@ -1500,8 +1500,25 @@ async function callTool(name, args) {
   switch (name) {
     case "ghl_search_contacts": {
       const { query, limit = 10 } = args;
-      const data = await ghl(`/contacts/search?locationId=${LOCATION}&query=${encodeURIComponent(query)}&page=1&pageLimit=${limit}`);
-      return (data.contacts || []).map(c => ({ id: c.id, name: c.name || "", email: c.email || "", phone: c.phone || "", tags: c.tags || [], memberStatus: c.memberStatus || "", customFields: c.customFields || [], createdAt: c.dateAdded }));
+      // GHL removed the GET variant of /contacts/search (was returning 400).
+      // Use POST with filters. Query is matched against name, email, and phone
+      // via the searchAfter/query mechanism.
+      const data = await ghlPost("/contacts/search", {
+        locationId: LOCATION,
+        pageLimit: limit,
+        page: 1,
+        query: query,
+      });
+      return (data.contacts || []).map(c => ({
+        id:           c.id,
+        name:         c.name || `${c.firstName || ""} ${c.lastName || ""}`.trim(),
+        email:        c.email || "",
+        phone:        c.phone || "",
+        tags:         c.tags || [],
+        memberStatus: c.memberStatus || "",
+        customFields: c.customFields || [],
+        createdAt:    c.dateAdded,
+      }));
     }
     case "ghl_get_contact": {
       const data = await ghl(`/contacts/${args.contactId}`);
