@@ -1757,29 +1757,22 @@ async function callTool(name, args) {
     }
     // ── Tasks ─────────────────────────────────────────────────────────────────
     case "ghl_get_tasks": {
-      const { contactId, limit = 20 } = args;
-      // GHL v2: per-contact tasks use POST search, not GET
-      if (contactId) {
-        try {
-          const data = await ghlPost(`/contacts/${contactId}/tasks/search`, {});
-          return data.tasks || data.data || [];
-        } catch {
-          // Fallback to older GET (some accounts)
-          const data = await ghl(`/contacts/${contactId}/tasks`);
-          return data.tasks || [];
-        }
+      const { contactId } = args;
+      // GHL v2 only exposes tasks per-contact — there is no location-wide task
+      // list endpoint. Require contactId and use GET /contacts/{id}/tasks.
+      if (!contactId) {
+        throw new Error(
+          "ghl_get_tasks requires a contactId. GHL v2 API does not expose a location-wide task search endpoint — tasks can only be listed per contact. " +
+          "To list tasks for a specific contact: pass contactId (get one via ghl_search_contacts). " +
+          "To see all tasks across contacts, you'd need to iterate all contacts (expensive) or use the GHL UI: Contacts → Tasks tab."
+        );
       }
-      // Location-wide search — POST with location filter
-      const data = await ghlPost(`/contacts/tasks/search`, {
-        locationId: LOCATION,
-        completed: false,
-        limit,
-      });
-      return (data.tasks || data.data || []).map(t => ({
+      const data = await ghl(`/contacts/${contactId}/tasks`);
+      return (data.tasks || []).map(t => ({
         id:          t.id || t._id,
         title:       t.title || t.name || "",
         description: t.description || t.body || "",
-        contactId:   t.contactId || "",
+        contactId:   t.contactId || contactId,
         assignedTo:  t.assignedTo || "",
         completed:   t.completed === true,
         dueDate:     t.dueDate || "",
@@ -1880,12 +1873,10 @@ async function callTool(name, args) {
     // ── Documents ─────────────────────────────────────────────────────────────
     case "ghl_get_documents": {
       const { limit = 20 } = args;
-      // GHL v2 exposes documents/contracts under /proposals/ (verified 2026-09-23)
-      const data = await ghlTry([
-        `/proposals/documents?altId=${LOCATION}&altType=location&limit=${limit}`,
-        `/proposals/document/list?locationId=${LOCATION}&limit=${limit}`,
-        `/documents/?altId=${LOCATION}&altType=location&limit=${limit}`,
-      ]);
+      // GHL's /proposals/document/list endpoint exists and takes locationId.
+      // If it errors with "not authorized for this scope", the API key needs
+      // documents_contracts/list.readonly scope added and token regenerated.
+      const data = await ghl(`/proposals/document/list?locationId=${LOCATION}&limit=${limit}`);
       const items = data.documents || data.proposals || data.data || [];
       return items.map(d => ({
         id:        d.id || d._id,
@@ -1897,11 +1888,8 @@ async function callTool(name, args) {
       }));
     }
     case "ghl_get_document_templates": {
-      const data = await ghlTry([
-        `/proposals/templates?altId=${LOCATION}&altType=location`,
-        `/proposals/template/list?locationId=${LOCATION}`,
-        `/documents/template/list?locationId=${LOCATION}`,
-      ]);
+      // GHL error told us: /proposals/templates requires locationId (not altId)
+      const data = await ghl(`/proposals/templates?locationId=${LOCATION}&limit=100`);
       const items = data.templates || data.data || [];
       return Array.isArray(items) ? items.map(t => ({
         id:        t.id || t._id,
