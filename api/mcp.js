@@ -248,6 +248,33 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: "ghl_count_contacts_by_custom_field",
+    description: "Count contacts whose custom field matches a value. Server-side filter via GHL's search API. Fast — returns total count without pulling all contacts. Example: count event registrants by passing the event's custom field ID and value 'Registered'.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fieldId:  { type: "string", description: "Custom field ID (get via ghl_get_custom_fields)" },
+        value:    { type: "string", description: "Value to match (e.g. 'Registered', 'Attended', or any dropdown/text value)" },
+        operator: { type: "string", enum: ["eq", "contains", "not_eq", "not_contains", "exists", "not_exists"], description: "Match operator. Use 'contains' for checkbox fields that hold multiple values. Default: eq" },
+      },
+      required: ["fieldId"],
+    },
+  },
+  {
+    name: "ghl_search_contacts_by_custom_field",
+    description: "Search contacts by a custom field value and return matching contact details. Server-side filter — fast and complete. Use for pulling event registration/attendance lists from GHL's per-event custom fields.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fieldId:  { type: "string", description: "Custom field ID (get via ghl_get_custom_fields)" },
+        value:    { type: "string", description: "Value to match" },
+        operator: { type: "string", enum: ["eq", "contains", "not_eq", "not_contains", "exists", "not_exists"], description: "Match operator. Default: eq (use 'contains' for checkbox/multi-value fields)" },
+        limit:    { type: "number", description: "Max contacts to return (default 100, max 100 per page). Tool auto-paginates if more exist and returns all." },
+      },
+      required: ["fieldId"],
+    },
+  },
   // ── New tools from expanded scopes ───────────────────────────────────────────
   {
     name: "ghl_get_tasks",
@@ -1771,6 +1798,68 @@ async function callTool(name, args) {
         return { total, [`tag_${tag}`]: matched.length };
       }
       return { total };
+    }
+    case "ghl_count_contacts_by_custom_field": {
+      const { fieldId, value, operator = "eq" } = args;
+      // Server-side filter via GHL's search API. pageLimit=1 since we only need
+      // the total count from the response metadata.
+      const body = {
+        locationId: LOCATION,
+        pageLimit: 1,
+        page: 1,
+        filters: [{
+          field: `customField.${fieldId}`,
+          operator,
+          ...(value !== undefined ? { value } : {}),
+        }],
+      };
+      const data = await ghlPost("/contacts/search", body);
+      return {
+        fieldId,
+        value: value ?? null,
+        operator,
+        count: data.total ?? data.meta?.total ?? (data.contacts || []).length,
+      };
+    }
+    case "ghl_search_contacts_by_custom_field": {
+      const { fieldId, value, operator = "eq", limit = 100 } = args;
+      // Server-side filter; auto-paginate to collect up to `limit` matches.
+      const pageSize = 100;
+      const maxPages = Math.ceil(limit / pageSize) || 1;
+      const filter = {
+        field: `customField.${fieldId}`,
+        operator,
+        ...(value !== undefined ? { value } : {}),
+      };
+      const all = [];
+      let total = 0;
+      for (let page = 1; page <= maxPages; page++) {
+        const data = await ghlPost("/contacts/search", {
+          locationId: LOCATION,
+          pageLimit: pageSize,
+          page,
+          filters: [filter],
+        });
+        total = data.total ?? data.meta?.total ?? total;
+        const pageContacts = data.contacts || [];
+        all.push(...pageContacts);
+        if (pageContacts.length < pageSize) break;
+        if (all.length >= limit) break;
+      }
+      return {
+        fieldId,
+        value: value ?? null,
+        operator,
+        total,
+        returned: Math.min(all.length, limit),
+        contacts: all.slice(0, limit).map(c => ({
+          id:    c.id,
+          name:  c.name || `${c.firstName || ""} ${c.lastName || ""}`.trim(),
+          email: c.email || "",
+          phone: c.phone || "",
+          tags:  c.tags || [],
+        })),
+      };
     }
     // ── Tasks ─────────────────────────────────────────────────────────────────
     case "ghl_get_tasks": {
