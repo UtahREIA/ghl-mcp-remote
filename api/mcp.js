@@ -1799,52 +1799,85 @@ async function callTool(name, args) {
       }
       return { total };
     }
-    case "ghl_count_contacts_by_custom_field": {
-      const { fieldId, value, operator = "eq" } = args;
-      // Server-side filter via GHL's search API. pageLimit=1 since we only need
-      // the total count from the response metadata.
-      const body = {
-        locationId: LOCATION,
-        pageLimit: 1,
-        page: 1,
-        filters: [{
-          field: `customField.${fieldId}`,
-          operator,
-          ...(value !== undefined ? { value } : {}),
-        }],
-      };
-      const data = await ghlPost("/contacts/search", body);
-      return {
-        fieldId,
-        value: value ?? null,
-        operator,
-        count: data.total ?? data.meta?.total ?? (data.contacts || []).length,
-      };
-    }
+    case "ghl_count_contacts_by_custom_field":
     case "ghl_search_contacts_by_custom_field": {
       const { fieldId, value, operator = "eq", limit = 100 } = args;
-      // Server-side filter; auto-paginate to collect up to `limit` matches.
-      const pageSize = 100;
-      const maxPages = Math.ceil(limit / pageSize) || 1;
-      const filter = {
-        field: `customField.${fieldId}`,
-        operator,
-        ...(value !== undefined ? { value } : {}),
-      };
-      const all = [];
-      let total = 0;
-      for (let page = 1; page <= maxPages; page++) {
-        const data = await ghlPost("/contacts/search", {
-          locationId: LOCATION,
-          pageLimit: pageSize,
-          page,
-          filters: [filter],
-        });
-        total = data.total ?? data.meta?.total ?? total;
-        const pageContacts = data.contacts || [];
-        all.push(...pageContacts);
-        if (pageContacts.length < pageSize) break;
-        if (all.length >= limit) break;
+      const countOnly = name === "ghl_count_contacts_by_custom_field";
+
+      // Probe several filter shapes until one is accepted by GHL.
+      // "Invalid field X" errors from GHL tell us the shape is wrong.
+      const candidateFilters = [
+        // Most common GHL v2 formats
+        { field: `customField.${fieldId}`,  operator, value },
+        { field: `customFields.${fieldId}`, operator, value },
+        { field: fieldId,                    operator, value },
+        // Snake case variant
+        { field: `custom_field.${fieldId}`, operator, value },
+        // Nested shape: filter targets customFields and value carries the id
+        { field: "customFields", operator, value: { id: fieldId, value } },
+        { field: "customFields", operator: "value_exists", value: fieldId },
+        // Array-notation variant
+        { field: `customFields[${fieldId}]`, operator, value },
+      ];
+
+      let workingFilter = null;
+      let data = null;
+      const attempts = [];
+      for (const rawFilter of candidateFilters) {
+        // Strip undefined `value` to avoid sending nulls
+        const filter = {};
+        for (const [k, v] of Object.entries(rawFilter)) {
+          if (v !== undefined) filter[k] = v;
+        }
+        try {
+          data = await ghlPost("/contacts/search", {
+            locationId: LOCATION,
+            pageLimit: countOnly ? 1 : Math.min(limit, 100),
+            page: 1,
+            filters: [filter],
+          });
+          workingFilter = filter;
+          break;
+        } catch (e) {
+          attempts.push({ filter, error: e.message });
+          if (!/invalid field|invalid filter/i.test(e.message)) {
+            // Non-shape error — probably real; stop probing
+            throw new Error(`GHL rejected filter (non-shape error): ${e.message}. Attempts: ${JSON.stringify(attempts)}`);
+          }
+        }
+      }
+
+      if (!workingFilter) {
+        throw new Error(`GHL rejected all filter shape candidates. Attempts: ${JSON.stringify(attempts)}`);
+      }
+
+      let all = data.contacts || [];
+      let total = data.total ?? data.meta?.total ?? all.length;
+
+      // If search mode and we need more pages
+      if (!countOnly && limit > 100 && all.length === 100) {
+        const maxPages = Math.ceil(limit / 100);
+        for (let page = 2; page <= maxPages; page++) {
+          const pageData = await ghlPost("/contacts/search", {
+            locationId: LOCATION,
+            pageLimit: 100,
+            page,
+            filters: [workingFilter],
+          });
+          const pageContacts = pageData.contacts || [];
+          all.push(...pageContacts);
+          if (pageContacts.length < 100 || all.length >= limit) break;
+        }
+      }
+
+      if (countOnly) {
+        return {
+          fieldId,
+          value: value ?? null,
+          operator,
+          count: total,
+          _workingFilter: workingFilter,
+        };
       }
       return {
         fieldId,
@@ -1859,6 +1892,7 @@ async function callTool(name, args) {
           phone: c.phone || "",
           tags:  c.tags || [],
         })),
+        _workingFilter: workingFilter,
       };
     }
     // ── Tasks ─────────────────────────────────────────────────────────────────
