@@ -1803,66 +1803,33 @@ async function callTool(name, args) {
     case "ghl_search_contacts_by_custom_field": {
       const { fieldId, value, operator = "eq", limit = 100 } = args;
       const countOnly = name === "ghl_count_contacts_by_custom_field";
+      // Verified filter format: customFields.{id} (plural). GHL accepts both
+      // `eq` and `contains` for checkbox fields where values are stored as arrays.
+      const filter = { field: `customFields.${fieldId}`, operator };
+      if (value !== undefined) filter.value = value;
 
-      // Probe several filter shapes until one is accepted by GHL.
-      // "Invalid field X" errors from GHL tell us the shape is wrong.
-      const candidateFilters = [
-        // Most common GHL v2 formats
-        { field: `customField.${fieldId}`,  operator, value },
-        { field: `customFields.${fieldId}`, operator, value },
-        { field: fieldId,                    operator, value },
-        // Snake case variant
-        { field: `custom_field.${fieldId}`, operator, value },
-        // Nested shape: filter targets customFields and value carries the id
-        { field: "customFields", operator, value: { id: fieldId, value } },
-        { field: "customFields", operator: "value_exists", value: fieldId },
-        // Array-notation variant
-        { field: `customFields[${fieldId}]`, operator, value },
-      ];
+      const firstPage = await ghlPost("/contacts/search", {
+        locationId: LOCATION,
+        pageLimit: countOnly ? 1 : Math.min(limit, 100),
+        page: 1,
+        filters: [filter],
+      });
+      const total = firstPage.total ?? firstPage.meta?.total ?? (firstPage.contacts || []).length;
 
-      let workingFilter = null;
-      let data = null;
-      const attempts = [];
-      for (const rawFilter of candidateFilters) {
-        // Strip undefined `value` to avoid sending nulls
-        const filter = {};
-        for (const [k, v] of Object.entries(rawFilter)) {
-          if (v !== undefined) filter[k] = v;
-        }
-        try {
-          data = await ghlPost("/contacts/search", {
-            locationId: LOCATION,
-            pageLimit: countOnly ? 1 : Math.min(limit, 100),
-            page: 1,
-            filters: [filter],
-          });
-          workingFilter = filter;
-          break;
-        } catch (e) {
-          attempts.push({ filter, error: e.message });
-          if (!/invalid field|invalid filter/i.test(e.message)) {
-            // Non-shape error — probably real; stop probing
-            throw new Error(`GHL rejected filter (non-shape error): ${e.message}. Attempts: ${JSON.stringify(attempts)}`);
-          }
-        }
+      if (countOnly) {
+        return { fieldId, value: value ?? null, operator, count: total };
       }
 
-      if (!workingFilter) {
-        throw new Error(`GHL rejected all filter shape candidates. Attempts: ${JSON.stringify(attempts)}`);
-      }
-
-      let all = data.contacts || [];
-      let total = data.total ?? data.meta?.total ?? all.length;
-
-      // If search mode and we need more pages
-      if (!countOnly && limit > 100 && all.length === 100) {
+      let all = firstPage.contacts || [];
+      // Auto-paginate if more pages needed
+      if (limit > 100 && all.length === 100) {
         const maxPages = Math.ceil(limit / 100);
         for (let page = 2; page <= maxPages; page++) {
           const pageData = await ghlPost("/contacts/search", {
             locationId: LOCATION,
             pageLimit: 100,
             page,
-            filters: [workingFilter],
+            filters: [filter],
           });
           const pageContacts = pageData.contacts || [];
           all.push(...pageContacts);
@@ -1870,15 +1837,6 @@ async function callTool(name, args) {
         }
       }
 
-      if (countOnly) {
-        return {
-          fieldId,
-          value: value ?? null,
-          operator,
-          count: total,
-          _workingFilter: workingFilter,
-        };
-      }
       return {
         fieldId,
         value: value ?? null,
@@ -1892,7 +1850,6 @@ async function callTool(name, args) {
           phone: c.phone || "",
           tags:  c.tags || [],
         })),
-        _workingFilter: workingFilter,
       };
     }
     // ── Tasks ─────────────────────────────────────────────────────────────────
