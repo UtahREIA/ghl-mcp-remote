@@ -1668,52 +1668,86 @@ async function callTool(name, args) {
       return (data.campaigns || []).map(c => ({ id: c.id, name: c.name, status: c.status || "", type: c.campaignType || "" }));
     }
     case "ghl_get_email_templates": {
-      // Email Builder templates (what users actually create under Marketing →
-      // Emails → Templates) live at /emails/builder, not /emails/templates.
-      // Pagination: limit + offset. Loop until a page returns < limit items.
-      const { limit = 100, includeHtml = false } = args;
+      // Email Builder templates (what users create under Marketing → Emails →
+      // Templates) live at /emails/builder. Pagination: limit + offset.
+      const { limit = 100, includeHtml = false, debug = false } = args;
       const pageSize = Math.min(limit, 100);
       const allTemplates = [];
       let offset = 0;
+      let firstRawResponse = null;
 
       while (true) {
         const data = await ghl(`/emails/builder?locationId=${LOCATION}&limit=${pageSize}&offset=${offset}`);
-        const items = data.builderList || data.templates || data.data || data.items || [];
+        if (offset === 0) firstRawResponse = data;
+        // GHL has used several field names historically — check every plausible one
+        const items = data.builderList
+                   || data.builders
+                   || data.templates
+                   || data.data
+                   || data.items
+                   || data.results
+                   || (Array.isArray(data) ? data : [])
+                   || [];
         if (!items.length) break;
         for (const t of items) {
           allTemplates.push({
-            id:        t.id || t._id,
-            name:      t.name || t.title || "",
-            subject:   t.subject || "",
+            id:          t.id || t._id || t.templateId,
+            name:        t.name || t.title || "",
+            subject:     t.subject || "",
             previewText: t.previewText || "",
-            templateType: t.templateType || t.type || "",
-            parentId:  t.parentId || null,
-            updatedAt: t.updatedAt || t.dateUpdated || "",
-            createdAt: t.createdAt || t.dateAdded || "",
+            templateType:t.templateType || t.type || "",
+            parentId:    t.parentId || null,
+            updatedAt:   t.updatedAt || t.dateUpdated || "",
+            createdAt:   t.createdAt || t.dateAdded || "",
+            // Preview/download URLs if GHL provides them
+            previewUrl:  t.previewUrl || t.htmlUrl || "",
             // HTML is heavy — only include if explicitly requested
-            ...(includeHtml ? { html: t.html || t.body || "" } : {}),
+            ...(includeHtml ? { html: t.html || t.body || t.rawHtml || "" } : {}),
           });
         }
         if (items.length < pageSize) break;
         offset += pageSize;
         if (allTemplates.length >= limit) break;
       }
-      return { count: allTemplates.length, templates: allTemplates.slice(0, limit) };
+      const result = { count: allTemplates.length, templates: allTemplates.slice(0, limit) };
+      // Expose raw response when zero results OR debug flag set — helps diagnose
+      // what field name GHL actually uses on this account.
+      if (debug || allTemplates.length === 0) {
+        result._rawFirstPage = firstRawResponse;
+        result._rawTopLevelKeys = firstRawResponse ? Object.keys(firstRawResponse) : [];
+      }
+      return result;
     }
     case "ghl_get_email_template": {
-      // Get a single template with full HTML — used for deliverability testing
-      // where the caller needs the rendered body to send.
+      // GHL doesn't expose GET /emails/builder/{id} — the list endpoint is the
+      // only way to get template content. Call ghl_get_email_templates with
+      // includeHtml:true and filter to the ID you need.
       const { templateId } = args;
-      const data = await ghl(`/emails/builder/${templateId}?locationId=${LOCATION}`);
-      const t = data.template || data.builder || data;
+      const data = await ghl(`/emails/builder?locationId=${LOCATION}&limit=100&offset=0`);
+      const items = data.builderList || data.builders || data.templates || data.data || data.items || [];
+      // Walk through all pages to find the specific template
+      let allItems = [...items];
+      let offset = 100;
+      while (items.length === 100) {
+        const page = await ghl(`/emails/builder?locationId=${LOCATION}&limit=100&offset=${offset}`);
+        const pageItems = page.builderList || page.builders || page.templates || page.data || page.items || [];
+        if (!pageItems.length) break;
+        allItems.push(...pageItems);
+        if (pageItems.length < 100) break;
+        offset += 100;
+      }
+      const t = allItems.find(x => (x.id === templateId) || (x._id === templateId) || (x.templateId === templateId));
+      if (!t) throw new Error(`Template ${templateId} not found in /emails/builder list`);
       return {
         id:          t.id || t._id,
         name:        t.name || t.title || "",
         subject:     t.subject || "",
         previewText: t.previewText || "",
-        html:        t.html || t.body || "",
+        html:        t.html || t.body || t.rawHtml || "",
+        previewUrl:  t.previewUrl || t.htmlUrl || "",
         updatedAt:   t.updatedAt || "",
         createdAt:   t.createdAt || "",
+        _availableKeys: Object.keys(t),
       };
     }
     case "ghl_get_surveys": {
