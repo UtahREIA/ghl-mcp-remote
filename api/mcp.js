@@ -194,8 +194,25 @@ const TOOLS = [
   },
   {
     name: "ghl_get_email_templates",
-    description: "List email templates built in GHL.",
-    inputSchema: { type: "object", properties: {} },
+    description: "List email templates built in GHL's Email Builder (Marketing → Emails → Templates). Auto-paginates through all templates. Returns id, name, subject, preview text, and timestamps. Pass includeHtml:true to get the full rendered HTML body (heavy — only use when you need to actually send).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit:       { type: "number", description: "Max templates to return (default 100)" },
+        includeHtml: { type: "boolean", description: "Include full HTML body in each template (slow — only use when sending). Default false." },
+      },
+    },
+  },
+  {
+    name: "ghl_get_email_template",
+    description: "Get a single email template by ID with full HTML body. Use after ghl_get_email_templates when you need the actual email content for sending or deliverability testing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        templateId: { type: "string", description: "Template ID from ghl_get_email_templates" },
+      },
+      required: ["templateId"],
+    },
   },
   {
     name: "ghl_get_surveys",
@@ -1651,59 +1668,53 @@ async function callTool(name, args) {
       return (data.campaigns || []).map(c => ({ id: c.id, name: c.name, status: c.status || "", type: c.campaignType || "" }));
     }
     case "ghl_get_email_templates": {
-      // With the new emails/templates.readonly scope, GHL exposes a proper
-      // /emails/templates endpoint that returns all templates flat (no recursion).
-      // Fall back to recursing /emails/builder if the new path isn't available.
+      // Email Builder templates (what users actually create under Marketing →
+      // Emails → Templates) live at /emails/builder, not /emails/templates.
+      // Pagination: limit + offset. Loop until a page returns < limit items.
+      const { limit = 100, includeHtml = false } = args;
+      const pageSize = Math.min(limit, 100);
       const allTemplates = [];
+      let offset = 0;
 
-      try {
-        const data = await ghl(`/emails/templates?locationId=${LOCATION}&limit=500`);
-        const items = data.templates || data.data || data.items || [];
+      while (true) {
+        const data = await ghl(`/emails/builder?locationId=${LOCATION}&limit=${pageSize}&offset=${offset}`);
+        const items = data.builderList || data.templates || data.data || data.items || [];
+        if (!items.length) break;
         for (const t of items) {
           allTemplates.push({
             id:        t.id || t._id,
             name:      t.name || t.title || "",
             subject:   t.subject || "",
+            previewText: t.previewText || "",
+            templateType: t.templateType || t.type || "",
             parentId:  t.parentId || null,
-            updatedAt: t.updatedAt || "",
-            createdAt: t.createdAt || "",
+            updatedAt: t.updatedAt || t.dateUpdated || "",
+            createdAt: t.createdAt || t.dateAdded || "",
+            // HTML is heavy — only include if explicitly requested
+            ...(includeHtml ? { html: t.html || t.body || "" } : {}),
           });
         }
-      } catch {
-        // Fallback: recurse through /emails/builder folders
-        const seenIds = new Set();
-        async function fetchFolder(parentId) {
-          let qs = `locationId=${LOCATION}&limit=100`;
-          if (parentId) qs += `&parentId=${parentId}`;
-          let data;
-          try {
-            data = await ghl(`/emails/builder?${qs}`);
-          } catch {
-            return;
-          }
-          const items = data.templates || data.data || data.items || [];
-          for (const item of items) {
-            const id = item.id || item._id;
-            if (!id || seenIds.has(id)) continue;
-            seenIds.add(id);
-            if (item.type === "folder" || item.isFolder || item.kind === "folder") {
-              await fetchFolder(id);
-            } else {
-              allTemplates.push({
-                id,
-                name:      item.name || item.title || "",
-                subject:   item.subject || "",
-                parentId:  item.parentId || parentId || null,
-                updatedAt: item.updatedAt || item.dateUpdated || "",
-                createdAt: item.createdAt || item.dateAdded || "",
-              });
-            }
-          }
-        }
-        await fetchFolder(null);
+        if (items.length < pageSize) break;
+        offset += pageSize;
+        if (allTemplates.length >= limit) break;
       }
-
-      return { count: allTemplates.length, templates: allTemplates };
+      return { count: allTemplates.length, templates: allTemplates.slice(0, limit) };
+    }
+    case "ghl_get_email_template": {
+      // Get a single template with full HTML — used for deliverability testing
+      // where the caller needs the rendered body to send.
+      const { templateId } = args;
+      const data = await ghl(`/emails/builder/${templateId}?locationId=${LOCATION}`);
+      const t = data.template || data.builder || data;
+      return {
+        id:          t.id || t._id,
+        name:        t.name || t.title || "",
+        subject:     t.subject || "",
+        previewText: t.previewText || "",
+        html:        t.html || t.body || "",
+        updatedAt:   t.updatedAt || "",
+        createdAt:   t.createdAt || "",
+      };
     }
     case "ghl_get_surveys": {
       const data = await ghl(`/surveys/?locationId=${LOCATION}`);
